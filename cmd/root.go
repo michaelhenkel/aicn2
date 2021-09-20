@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,16 +68,12 @@ type Cluster struct {
 		StatusUpdatedAt time.Time `json:"status_updated_at"`
 		TimeoutSeconds  int       `json:"timeout_seconds"`
 	} `json:"monitored_operators"`
-	Name             string `json:"name"`
-	OcpReleaseImage  string `json:"ocp_release_image"`
-	OpenshiftVersion string `json:"openshift_version"`
-	OrgID            string `json:"org_id"`
-	Platform         struct {
-		Type    string `json:"type"`
-		Vsphere struct {
-		} `json:"vsphere"`
-	} `json:"platform"`
-	Progress struct {
+	Name             string   `json:"name"`
+	OcpReleaseImage  string   `json:"ocp_release_image"`
+	OpenshiftVersion string   `json:"openshift_version"`
+	OrgID            string   `json:"org_id"`
+	Platform         Platform `json:"platform"`
+	Progress         struct {
 	} `json:"progress"`
 	PullSecretSet      bool   `json:"pull_secret_set"`
 	PullSecret         string `json:"pull_secret"`
@@ -95,6 +92,10 @@ type Cluster struct {
 	ValidationsInfo       string    `json:"validations_info"`
 	VipDhcpAllocation     bool      `json:"vip_dhcp_allocation"`
 	SSHPublicKey          string    `json:"ssh_public_key,omitempty"`
+}
+
+type Platform struct {
+	Type string `json:"type"`
 }
 
 type Token struct {
@@ -121,7 +122,10 @@ func NewCluster() *Cluster {
 			Cidr:       "10.233.64.0/18",
 			HostPrefix: 24,
 		}},
-		ServiceNetworkCidr:    "172.30.0.0/16",
+		ServiceNetworkCidr: "172.30.0.0/16",
+		Platform: Platform{
+			Type: "baremetal",
+		},
 		UserManagedNetworking: true,
 		VipDhcpAllocation:     false,
 		HighAvailabilityMode:  "None",
@@ -149,7 +153,7 @@ func (c *Cluster) List() (*ClusterList, error) {
 		"accept":        "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", token),
 	}
-	resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters", assistedServiceAPI), "GET", nil, header, nil)
+	resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters", assistedServiceAPI), "GET", header, nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -170,19 +174,10 @@ var rootCmd = &cobra.Command{
 	Use: "aicn2",
 }
 
-func httpRequest(endpoint string, m string, dataSets map[string]string, header map[string]string, dataContent []byte) ([]byte, error) {
-	data := url.Values{}
-	var bodyContent io.Reader
-
-	if len(dataSets) > 0 {
-		for k, v := range dataSets {
-			data.Set(k, v)
-		}
-		bodyContent = strings.NewReader(data.Encode())
-	}
+func httpRequest(endpoint string, m string, header map[string]string, content io.Reader, contentLength string) ([]byte, error) {
 
 	client := &http.Client{}
-	r, err := http.NewRequest(m, endpoint, bodyContent) // URL-encoded payload
+	r, err := http.NewRequest(m, endpoint, content) // URL-encoded payload
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +186,7 @@ func httpRequest(endpoint string, m string, dataSets map[string]string, header m
 			r.Header.Add(k, v)
 		}
 	}
-	r.Header.Add("Content-Length", strconv.Itoa(len(data.Encode())))
+	r.Header.Add("Content-Length", contentLength)
 
 	res, err := client.Do(r)
 	if err != nil {
@@ -223,12 +218,19 @@ func getToken() error {
 		"client_id":     "cloud-services",
 		"refresh_token": offlineToken,
 	}
+	data := url.Values{}
+
+	for k, v := range dataSet {
+		data.Set(k, v)
+	}
+	content := strings.NewReader(data.Encode())
 
 	header := map[string]string{
 		"Content-Type": "application/x-www-form-urlencoded",
 	}
+	contentLength := strconv.Itoa(len(data.Encode()))
 
-	resp, err := httpRequest("https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token", "POST", dataSet, header, nil)
+	resp, err := httpRequest("https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token", "POST", header, content, contentLength)
 	if err != nil {
 		return err
 	}
@@ -315,11 +317,13 @@ var create = &cobra.Command{
 		if err != nil {
 			klog.Fatal(err)
 		}
+		content := bytes.NewReader(clusterByte)
 		header := map[string]string{
-			"accept":        "application/json",
+			"Content-Type":  "application/json",
 			"Authorization": fmt.Sprintf("Bearer %s", token),
 		}
-		resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters", assistedServiceAPI), "POST", nil, header, clusterByte)
+		contentLength := strconv.Itoa(len(clusterByte))
+		resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters", assistedServiceAPI), "POST", header, content, contentLength)
 		if err != nil {
 			klog.Fatal(err)
 		}
@@ -346,7 +350,7 @@ var delete = &cobra.Command{
 					"accept":        "application/json",
 					"Authorization": fmt.Sprintf("Bearer %s", token),
 				}
-				resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", nil, header, nil)
+				resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
 				if err != nil {
 					klog.Fatal(err)
 				}
