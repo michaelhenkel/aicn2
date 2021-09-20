@@ -1,20 +1,14 @@
 package cmd
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"net/http"
-	"net/url"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"k8s.io/klog"
+
+	api "github.com/michaelhenkel/aicn2/pkg/apis"
 )
 
 type method string
@@ -26,253 +20,13 @@ const (
 	DELETE             method = "DELETE"
 )
 
-type ClusterNetwork struct {
-	Cidr       string `json:"cidr"`
-	ClusterID  string `json:"cluster_id"`
-	HostPrefix int    `json:"host_prefix"`
-}
-
-type Cluster struct {
-	AmsSubscriptionID          string           `json:"ams_subscription_id"`
-	BaseDNSDomain              string           `json:"base_dns_domain"`
-	ClusterNetworkCidr         string           `json:"cluster_network_cidr"`
-	ClusterNetworkHostPrefix   int              `json:"cluster_network_host_prefix"`
-	ClusterNetworks            []ClusterNetwork `json:"cluster_networks"`
-	ConnectivityMajorityGroups string           `json:"connectivity_majority_groups"`
-	ControllerLogsCollectedAt  time.Time        `json:"controller_logs_collected_at"`
-	ControllerLogsStartedAt    time.Time        `json:"controller_logs_started_at"`
-	CPUArchitecture            string           `json:"cpu_architecture"`
-	CreatedAt                  time.Time        `json:"created_at"`
-	DiskEncryption             struct {
-	} `json:"disk_encryption"`
-	EmailDomain          string        `json:"email_domain"`
-	FeatureUsage         string        `json:"feature_usage"`
-	HighAvailabilityMode string        `json:"high_availability_mode"`
-	HostNetworks         interface{}   `json:"host_networks"`
-	Hosts                []interface{} `json:"hosts"`
-	Href                 string        `json:"href"`
-	Hyperthreading       string        `json:"hyperthreading"`
-	ID                   string        `json:"id"`
-	ImageInfo            struct {
-		CreatedAt time.Time `json:"created_at"`
-		ExpiresAt time.Time `json:"expires_at"`
-	} `json:"image_info"`
-	InstallCompletedAt time.Time     `json:"install_completed_at"`
-	InstallStartedAt   time.Time     `json:"install_started_at"`
-	Kind               string        `json:"kind"`
-	MachineNetworks    []interface{} `json:"machine_networks"`
-	MonitoredOperators []struct {
-		ClusterID       string    `json:"cluster_id"`
-		Name            string    `json:"name"`
-		OperatorType    string    `json:"operator_type"`
-		StatusUpdatedAt time.Time `json:"status_updated_at"`
-		TimeoutSeconds  int       `json:"timeout_seconds"`
-	} `json:"monitored_operators"`
-	Name             string     `json:"name"`
-	Networking       Networking `json:"networking"`
-	OcpReleaseImage  string     `json:"ocp_release_image"`
-	OpenshiftVersion string     `json:"openshift_version"`
-	OrgID            string     `json:"org_id"`
-	Platform         Platform   `json:"platform"`
-	Progress         struct {
-	} `json:"progress"`
-	PullSecretSet      bool   `json:"pull_secret_set"`
-	PullSecret         string `json:"pull_secret"`
-	SchedulableMasters bool   `json:"schedulable_masters"`
-	ServiceNetworkCidr string `json:"service_network_cidr"`
-	ServiceNetworks    []struct {
-		Cidr      string `json:"cidr"`
-		ClusterID string `json:"cluster_id"`
-	} `json:"service_networks"`
-	Status                string    `json:"status"`
-	StatusInfo            string    `json:"status_info"`
-	StatusUpdatedAt       time.Time `json:"status_updated_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
-	UserManagedNetworking bool      `json:"user_managed_networking"`
-	UserName              string    `json:"user_name"`
-	ValidationsInfo       string    `json:"validations_info"`
-	VipDhcpAllocation     bool      `json:"vip_dhcp_allocation"`
-	SSHPublicKey          string    `json:"ssh_public_key,omitempty"`
-}
-
-type Networking struct {
-	NetworkType string `json:"networkType"`
-}
-
-type Platform struct {
-	Type string `json:"type"`
-}
-
-type Token struct {
-	AccessToken      string `json:"access_token"`
-	ExpiresIn        int    `json:"expires_in"`
-	RefreshExpiresIn int    `json:"refresh_expires_in"`
-	RefreshToken     string `json:"refresh_token"`
-	TokenType        string `json:"token_type"`
-	IDToken          string `json:"id_token"`
-	NotBeforePolicy  int    `json:"not-before-policy"`
-	SessionState     string `json:"session_state"`
-	Scope            string `json:"scope"`
-}
-
-type PullSecret struct {
-	Auths struct {
-		CloudOpenshiftCom struct {
-			Auth  string `json:"auth"`
-			Email string `json:"email"`
-		} `json:"cloud.openshift.com"`
-		QuayIo struct {
-			Auth  string `json:"auth"`
-			Email string `json:"email"`
-		} `json:"quay.io"`
-		RegistryConnectRedhatCom struct {
-			Auth  string `json:"auth"`
-			Email string `json:"email"`
-		} `json:"registry.connect.redhat.com"`
-		RegistryRedhatIo struct {
-			Auth  string `json:"auth"`
-			Email string `json:"email"`
-		} `json:"registry.redhat.io"`
-	} `json:"auths"`
-}
-
-func NewCluster() *Cluster {
-	return &Cluster{
-		Kind:               "Cluster",
-		OpenshiftVersion:   "4.8",
-		OcpReleaseImage:    "quay.io/openshift-release-dev/ocp-release:4.8.4-x86_64",
-		BaseDNSDomain:      "cluster.local",
-		Hyperthreading:     "all",
-		ClusterNetworkCidr: "10.128.0.0/14",
-		ClusterNetworks: []ClusterNetwork{{
-			Cidr:       "10.233.64.0/18",
-			HostPrefix: 24,
-		}},
-		ServiceNetworkCidr: "172.30.0.0/16",
-		Networking: Networking{
-			NetworkType: "Contrail",
-		},
-		Platform: Platform{
-			Type: "baremetal",
-		},
-		UserManagedNetworking: true,
-		VipDhcpAllocation:     false,
-		HighAvailabilityMode:  "None",
-	}
-}
-
-func (c *ClusterList) String() (string, error) {
-	tbyte, err := json.Marshal(c)
-	if err != nil {
-		return "", err
-	}
-	return string(tbyte), nil
-}
-
-type ClusterList []struct {
-	Cluster
-}
-
-func (c *Cluster) Get(name string) {
-
-}
-
-func (c *Cluster) List() (*ClusterList, error) {
-	header := map[string]string{
-		"accept":        "application/json",
-		"Authorization": fmt.Sprintf("Bearer %s", token),
-	}
-	resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters", assistedServiceAPI), "GET", header, nil, "")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	clusterList := &ClusterList{}
-	if err := json.Unmarshal(body, clusterList); err != nil {
-		return nil, err
-	}
-	return clusterList, nil
-}
-
 var (
 	offlineToken string
 	token        string
-	file         string
 )
 
 var rootCmd = &cobra.Command{
 	Use: "aicn2",
-}
-
-func httpRequest(endpoint string, m string, header map[string]string, content io.Reader, contentLength string) (*http.Response, error) {
-
-	client := &http.Client{}
-	r, err := http.NewRequest(m, endpoint, content) // URL-encoded payload
-	if err != nil {
-		return nil, err
-	}
-	if len(header) > 0 {
-		for k, v := range header {
-			r.Header.Add(k, v)
-		}
-	}
-	r.Header.Add("Content-Length", contentLength)
-
-	res, err := client.Do(r)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
-}
-
-func getToken() error {
-	if offlineToken == "" {
-		offlineToken = os.Getenv("OFFLINE_TOKEN")
-		if offlineToken == "" {
-			offlineTokenByte, err := os.ReadFile(".offlinetoken")
-			if err != nil {
-				return fmt.Errorf("cannot access offline token")
-			}
-			offlineToken = strings.TrimRight(string(offlineTokenByte), "\n")
-		}
-	}
-
-	dataSet := map[string]string{
-		"grant_type":    "refresh_token",
-		"client_id":     "cloud-services",
-		"refresh_token": offlineToken,
-	}
-	data := url.Values{}
-
-	for k, v := range dataSet {
-		data.Set(k, v)
-	}
-	content := strings.NewReader(data.Encode())
-
-	header := map[string]string{
-		"Content-Type": "application/x-www-form-urlencoded",
-	}
-	contentLength := strconv.Itoa(len(data.Encode()))
-
-	resp, err := httpRequest("https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token", "POST", header, content, contentLength)
-	if err != nil {
-		return err
-	}
-	t := &Token{}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, t); err != nil {
-		return err
-	}
-	token = t.AccessToken
-	return nil
 }
 
 func Execute() {
@@ -285,231 +39,28 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&offlineToken, "offlinetoken", "", "access token file")
-	create.PersistentFlags().StringVar(&file, "file", "", "access token file")
 	rootCmd.AddCommand(create)
 	rootCmd.AddCommand(delete)
 	rootCmd.AddCommand(get)
 	rootCmd.AddCommand(list)
+	rootCmd.AddCommand(upload)
+	rootCmd.AddCommand(getmanifests)
 }
 
 func initConfig() {
-	if err := getToken(); err != nil {
+	if offlineToken == "" {
+		offlineToken = os.Getenv("OFFLINE_TOKEN")
+		if offlineToken == "" {
+			offlineTokenByte, err := os.ReadFile(".offlinetoken")
+			if err != nil {
+				klog.Fatal(fmt.Errorf("cannot access offline token"))
+			}
+			offlineToken = strings.TrimRight(string(offlineTokenByte), "\n")
+		}
+	}
+	var err error
+	token, err = api.GetToken(offlineToken)
+	if err != nil {
 		klog.Fatal("--offlinetoken must be provided or ACCESS_TOKEN env set or available in .offlinetoken ", err)
 	}
-}
-
-var create = &cobra.Command{
-	Use:   "create [name]",
-	Short: "",
-	Long:  ``,
-	Run: func(cmd *cobra.Command, args []string) {
-		cluster := NewCluster()
-		if file == "" && len(args) != 1 {
-			klog.Fatal("--file or name has to be specified")
-		}
-		if file != "" {
-			fileByte, err := os.ReadFile(file)
-			if err != nil {
-				klog.Fatal(err)
-			}
-			if err := json.Unmarshal(fileByte, cluster); err != nil {
-				klog.Fatal(err)
-			}
-		}
-		if len(args) == 1 {
-			cluster.Name = args[0]
-		}
-		if cluster.PullSecret == "" {
-			pullSecretByte, err := os.ReadFile("pull-secret.txt")
-			if err != nil {
-				klog.Fatal(err)
-			}
-			/*
-				pullSecret := &PullSecret{}
-				if err := json.Unmarshal(pullSecretByte, pullSecret); err != nil {
-					klog.Fatal(err)
-				}
-			*/
-			cluster.PullSecret = string(pullSecretByte)
-		}
-		if cluster.SSHPublicKey == "" {
-			homedir, err := os.UserHomeDir()
-			if err != nil {
-				klog.Fatal(err)
-			}
-			sshPubKeyByte, err := os.ReadFile(fmt.Sprintf("%s/.ssh/id_rsa.pub", homedir))
-			if err != nil {
-				klog.Fatal(err)
-			}
-			cluster.SSHPublicKey = string(sshPubKeyByte)
-		}
-		clusterList, err := cluster.List()
-		if err != nil {
-			klog.Fatal(err)
-		}
-		for _, cl := range *clusterList {
-			if cl.Name == cluster.Name {
-				klog.Fatal("cluster already exists")
-			}
-		}
-		if err := cluster.createCluster(); err != nil {
-			klog.Fatal(err)
-		}
-		if err := cluster.generateISO(); err != nil {
-			klog.Fatal(err)
-		}
-		if err := cluster.downloadISO(); err != nil {
-			klog.Fatal(err)
-		}
-	},
-}
-
-func (c *Cluster) createCluster() error {
-	clusterByte, err := json.Marshal(c)
-	if err != nil {
-		klog.Fatal(err)
-	}
-	content := bytes.NewReader(clusterByte)
-	header := map[string]string{
-		"Content-Type":  "application/json",
-		"Authorization": fmt.Sprintf("Bearer %s", token),
-	}
-	contentLength := strconv.Itoa(len(clusterByte))
-	resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters", assistedServiceAPI), "POST", header, content, contentLength)
-	if err != nil {
-		klog.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		klog.Fatal(err)
-	}
-	if err := json.Unmarshal(body, c); err != nil {
-		klog.Fatal(err)
-	}
-	return nil
-}
-
-func (c *Cluster) downloadISO() error {
-	header := map[string]string{
-		"Authorization": fmt.Sprintf("Bearer %s", token),
-	}
-	fmt.Printf("TOKEN=%s\n", token)
-	fmt.Printf("CLUSTER_ID=%s\n", c.ID)
-	fmt.Printf("ASSISTED_SERVICE_API=%s\n", assistedServiceAPI)
-	resp, err := httpRequest(fmt.Sprintf("http://%s/api/assisted-install/v1/clusters/%s/downloads/image", assistedServiceAPI, c.ID), "GET", header, nil, "")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Create the file
-	out, err := os.Create(fmt.Sprintf("%s.iso", c.Name))
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	// Write the body to file
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *Cluster) generateISO() error {
-
-	var data struct {
-		SSHPublicKey string      `json:"ssh_public_key"`
-		PullSecret   *PullSecret `json:"pull_secret"`
-	}
-	pullSecretByte := []byte(c.PullSecret)
-	pullSecret := &PullSecret{}
-	if err := json.Unmarshal(pullSecretByte, pullSecret); err != nil {
-		return nil
-	}
-	data.SSHPublicKey = c.SSHPublicKey
-	data.PullSecret = pullSecret
-
-	dataByte, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	content := bytes.NewReader(dataByte)
-	contentLength := strconv.Itoa(len(dataByte))
-
-	header := map[string]string{
-		"Content-Type":  "application/json",
-		"Authorization": fmt.Sprintf("Bearer %s", token),
-	}
-	resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s/downloads/image", assistedServiceAPI, c.ID), "POST", header, content, contentLength)
-	if err != nil {
-		return err
-	}
-	fmt.Println(resp)
-	return nil
-}
-
-var delete = &cobra.Command{
-	Use:   "delete [name]",
-	Short: "",
-	Long:  ``,
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) != 1 {
-			klog.Fatal("name is missing")
-		}
-		cluster := NewCluster()
-		clusterList, err := cluster.List()
-		if err != nil {
-			klog.Fatal(err)
-		}
-		for _, cl := range *clusterList {
-			if cl.Name == args[0] {
-				header := map[string]string{
-					"accept":        "application/json",
-					"Authorization": fmt.Sprintf("Bearer %s", token),
-				}
-				_, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
-				if err != nil {
-					klog.Fatal(err)
-				}
-			}
-		}
-	},
-}
-
-var get = &cobra.Command{
-	Use:   "get [name]",
-	Short: "",
-	Long:  ``,
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) != 1 {
-			klog.Fatal("name is missing")
-		}
-		cluster := NewCluster()
-		clusterList, err := cluster.List()
-		if err != nil {
-			klog.Fatal(err)
-		}
-		for _, cl := range *clusterList {
-			if cl.Name == args[0] {
-				fmt.Println(cl)
-			}
-		}
-	},
-}
-
-var list = &cobra.Command{
-	Use:   "list",
-	Short: "",
-	Long:  ``,
-	Run: func(cmd *cobra.Command, args []string) {
-		cluster := NewCluster()
-		clusterList, err := cluster.List()
-		if err != nil {
-			klog.Fatal(err)
-		}
-		fmt.Println(clusterList.String())
-	},
 }

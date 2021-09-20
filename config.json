@@ -7,5 +7,5 @@
   "cluster_network_host_prefix": 24,
   "service_network_cidr": "172.30.0.0/16",
   "high_availability_mode": "None",
-  "host_networks": "10.233.64.0/18"
+  "machine_network_cidr": "10.233.64.0/18"
 }
