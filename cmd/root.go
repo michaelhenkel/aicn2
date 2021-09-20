@@ -68,11 +68,12 @@ type Cluster struct {
 		StatusUpdatedAt time.Time `json:"status_updated_at"`
 		TimeoutSeconds  int       `json:"timeout_seconds"`
 	} `json:"monitored_operators"`
-	Name             string   `json:"name"`
-	OcpReleaseImage  string   `json:"ocp_release_image"`
-	OpenshiftVersion string   `json:"openshift_version"`
-	OrgID            string   `json:"org_id"`
-	Platform         Platform `json:"platform"`
+	Name             string     `json:"name"`
+	Networking       Networking `json:"networking"`
+	OcpReleaseImage  string     `json:"ocp_release_image"`
+	OpenshiftVersion string     `json:"openshift_version"`
+	OrgID            string     `json:"org_id"`
+	Platform         Platform   `json:"platform"`
 	Progress         struct {
 	} `json:"progress"`
 	PullSecretSet      bool   `json:"pull_secret_set"`
@@ -94,6 +95,10 @@ type Cluster struct {
 	SSHPublicKey          string    `json:"ssh_public_key,omitempty"`
 }
 
+type Networking struct {
+	NetworkType string `json:"networkType"`
+}
+
 type Platform struct {
 	Type string `json:"type"`
 }
@@ -110,6 +115,27 @@ type Token struct {
 	Scope            string `json:"scope"`
 }
 
+type PullSecret struct {
+	Auths struct {
+		CloudOpenshiftCom struct {
+			Auth  string `json:"auth"`
+			Email string `json:"email"`
+		} `json:"cloud.openshift.com"`
+		QuayIo struct {
+			Auth  string `json:"auth"`
+			Email string `json:"email"`
+		} `json:"quay.io"`
+		RegistryConnectRedhatCom struct {
+			Auth  string `json:"auth"`
+			Email string `json:"email"`
+		} `json:"registry.connect.redhat.com"`
+		RegistryRedhatIo struct {
+			Auth  string `json:"auth"`
+			Email string `json:"email"`
+		} `json:"registry.redhat.io"`
+	} `json:"auths"`
+}
+
 func NewCluster() *Cluster {
 	return &Cluster{
 		Kind:               "Cluster",
@@ -123,6 +149,9 @@ func NewCluster() *Cluster {
 			HostPrefix: 24,
 		}},
 		ServiceNetworkCidr: "172.30.0.0/16",
+		Networking: Networking{
+			NetworkType: "Contrail",
+		},
 		Platform: Platform{
 			Type: "baremetal",
 		},
@@ -157,8 +186,13 @@ func (c *Cluster) List() (*ClusterList, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
 	clusterList := &ClusterList{}
-	if err := json.Unmarshal(resp, clusterList); err != nil {
+	if err := json.Unmarshal(body, clusterList); err != nil {
 		return nil, err
 	}
 	return clusterList, nil
@@ -174,7 +208,7 @@ var rootCmd = &cobra.Command{
 	Use: "aicn2",
 }
 
-func httpRequest(endpoint string, m string, header map[string]string, content io.Reader, contentLength string) ([]byte, error) {
+func httpRequest(endpoint string, m string, header map[string]string, content io.Reader, contentLength string) (*http.Response, error) {
 
 	client := &http.Client{}
 	r, err := http.NewRequest(m, endpoint, content) // URL-encoded payload
@@ -192,13 +226,7 @@ func httpRequest(endpoint string, m string, header map[string]string, content io
 	if err != nil {
 		return nil, err
 	}
-
-	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-	return body, nil
+	return res, nil
 }
 
 func getToken() error {
@@ -235,7 +263,12 @@ func getToken() error {
 		return err
 	}
 	t := &Token{}
-	if err := json.Unmarshal(resp, t); err != nil {
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, t); err != nil {
 		return err
 	}
 	token = t.AccessToken
@@ -291,6 +324,12 @@ var create = &cobra.Command{
 			if err != nil {
 				klog.Fatal(err)
 			}
+			/*
+				pullSecret := &PullSecret{}
+				if err := json.Unmarshal(pullSecretByte, pullSecret); err != nil {
+					klog.Fatal(err)
+				}
+			*/
 			cluster.PullSecret = string(pullSecretByte)
 		}
 		if cluster.SSHPublicKey == "" {
@@ -313,22 +352,103 @@ var create = &cobra.Command{
 				klog.Fatal("cluster already exists")
 			}
 		}
-		clusterByte, err := json.Marshal(cluster)
-		if err != nil {
+		if err := cluster.createCluster(); err != nil {
 			klog.Fatal(err)
 		}
-		content := bytes.NewReader(clusterByte)
-		header := map[string]string{
-			"Content-Type":  "application/json",
-			"Authorization": fmt.Sprintf("Bearer %s", token),
-		}
-		contentLength := strconv.Itoa(len(clusterByte))
-		resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters", assistedServiceAPI), "POST", header, content, contentLength)
-		if err != nil {
+		if err := cluster.generateISO(); err != nil {
 			klog.Fatal(err)
 		}
-		fmt.Println(string(resp))
+		if err := cluster.downloadISO(); err != nil {
+			klog.Fatal(err)
+		}
 	},
+}
+
+func (c *Cluster) createCluster() error {
+	clusterByte, err := json.Marshal(c)
+	if err != nil {
+		klog.Fatal(err)
+	}
+	content := bytes.NewReader(clusterByte)
+	header := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+	}
+	contentLength := strconv.Itoa(len(clusterByte))
+	resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters", assistedServiceAPI), "POST", header, content, contentLength)
+	if err != nil {
+		klog.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		klog.Fatal(err)
+	}
+	if err := json.Unmarshal(body, c); err != nil {
+		klog.Fatal(err)
+	}
+	return nil
+}
+
+func (c *Cluster) downloadISO() error {
+	header := map[string]string{
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+	}
+	fmt.Printf("TOKEN=%s\n", token)
+	fmt.Printf("CLUSTER_ID=%s\n", c.ID)
+	fmt.Printf("ASSISTED_SERVICE_API=%s\n", assistedServiceAPI)
+	resp, err := httpRequest(fmt.Sprintf("http://%s/api/assisted-install/v1/clusters/%s/downloads/image", assistedServiceAPI, c.ID), "GET", header, nil, "")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Create the file
+	out, err := os.Create(fmt.Sprintf("%s.iso", c.Name))
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	// Write the body to file
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Cluster) generateISO() error {
+
+	var data struct {
+		SSHPublicKey string      `json:"ssh_public_key"`
+		PullSecret   *PullSecret `json:"pull_secret"`
+	}
+	pullSecretByte := []byte(c.PullSecret)
+	pullSecret := &PullSecret{}
+	if err := json.Unmarshal(pullSecretByte, pullSecret); err != nil {
+		return nil
+	}
+	data.SSHPublicKey = c.SSHPublicKey
+	data.PullSecret = pullSecret
+
+	dataByte, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	content := bytes.NewReader(dataByte)
+	contentLength := strconv.Itoa(len(dataByte))
+
+	header := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", token),
+	}
+	resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s/downloads/image", assistedServiceAPI, c.ID), "POST", header, content, contentLength)
+	if err != nil {
+		return err
+	}
+	fmt.Println(resp)
+	return nil
 }
 
 var delete = &cobra.Command{
@@ -350,11 +470,10 @@ var delete = &cobra.Command{
 					"accept":        "application/json",
 					"Authorization": fmt.Sprintf("Bearer %s", token),
 				}
-				resp, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
+				_, err := httpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
 				if err != nil {
 					klog.Fatal(err)
 				}
-				fmt.Println(string(resp))
 			}
 		}
 	},
