@@ -9,6 +9,8 @@ import (
 	"k8s.io/klog"
 
 	api "github.com/michaelhenkel/aicn2/pkg/apis"
+	"github.com/michaelhenkel/aicn2/pkg/cn2"
+	"github.com/michaelhenkel/aicn2/pkg/infrastructure"
 )
 
 var (
@@ -42,18 +44,19 @@ var create = &cobra.Command{
 		if len(args) == 1 {
 			cluster.Name = args[0]
 		}
+		homedir, err := os.UserHomeDir()
+		if err != nil {
+			klog.Fatal(err)
+		}
 		if cluster.PullSecret == "" {
-			pullSecretByte, err := os.ReadFile("pull-secret.txt")
+			pullSecretByte, err := os.ReadFile(fmt.Sprintf("%s/.aicn2/pull-secret.txt", homedir))
 			if err != nil {
 				klog.Fatal(err)
 			}
 			cluster.PullSecret = string(pullSecretByte)
 		}
 		if cluster.SSHPublicKey == "" {
-			homedir, err := os.UserHomeDir()
-			if err != nil {
-				klog.Fatal(err)
-			}
+
 			sshPubKeyByte, err := os.ReadFile(fmt.Sprintf("%s/.ssh/id_rsa.pub", homedir))
 			if err != nil {
 				klog.Fatal(err)
@@ -78,6 +81,17 @@ var create = &cobra.Command{
 		if err := cluster.DownloadISO(); err != nil {
 			klog.Fatal(err)
 		}
+
+		var infraInterface infrastructure.InfrastructureInterface
+		c := &cn2.CN2{}
+		infraInterface = c
+		if err := infraInterface.PrepareStorage(infrastructure.Image{
+			Name: cluster.Name,
+			Path: fmt.Sprintf("%s/.aicn2/%s.iso", homedir, cluster.Name),
+		}); err != nil {
+			klog.Fatal(err)
+		}
+
 		if err := cluster.Upload("manifests"); err != nil {
 			klog.Fatal(err)
 		}

@@ -51,7 +51,11 @@ func initConfig() {
 	if offlineToken == "" {
 		offlineToken = os.Getenv("OFFLINE_TOKEN")
 		if offlineToken == "" {
-			offlineTokenByte, err := os.ReadFile(".offlinetoken")
+			homedir, err := os.UserHomeDir()
+			if err != nil {
+				klog.Fatal(err)
+			}
+			offlineTokenByte, err := os.ReadFile(fmt.Sprintf("%s/.aicn2/.offlinetoken", homedir))
 			if err != nil {
 				klog.Fatal(fmt.Errorf("cannot access offline token"))
 			}

@@ -317,7 +317,11 @@ func (c *Cluster) DownloadISO() error {
 	defer resp.Body.Close()
 
 	// Create the file
-	out, err := os.Create(fmt.Sprintf("%s.iso", c.Name))
+	homedir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	out, err := os.Create(fmt.Sprintf("%s/.aicn2/%s.iso", homedir, c.Name))
 	if err != nil {
 		return err
 	}

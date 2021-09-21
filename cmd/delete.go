@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	api "github.com/michaelhenkel/aicn2/pkg/apis"
+	"github.com/michaelhenkel/aicn2/pkg/cn2"
+	"github.com/michaelhenkel/aicn2/pkg/infrastructure"
 	"github.com/michaelhenkel/aicn2/pkg/utils"
 	"github.com/spf13/cobra"
 	"k8s.io/klog"
@@ -32,6 +34,15 @@ var delete = &cobra.Command{
 				if err != nil {
 					klog.Fatal(err)
 				}
+				var infraInterface infrastructure.InfrastructureInterface
+				c := &cn2.CN2{}
+				infraInterface = c
+				if err := infraInterface.DeleteISO(infrastructure.Image{
+					Name: cl.Name,
+				}); err != nil {
+					klog.Fatal(err)
+				}
+
 			}
 		}
 	},
