@@ -19,7 +19,7 @@ var (
 )
 
 func init() {
-	create.PersistentFlags().StringVar(&file, "file", "", "access token file")
+	create.PersistentFlags().StringVarP(&file, "file", "f", "", "access token file")
 	create.PersistentFlags().BoolVar(&noiso, "noiso", false, "don't create iso")
 }
 
@@ -67,33 +67,53 @@ var create = &cobra.Command{
 		if err != nil {
 			klog.Fatal(err)
 		}
+		clusterExists := false
 		for _, cl := range clusterList {
 			if cl.Name == cluster.Name {
-				klog.Fatal("cluster already exists")
+				clusterExists = true
 			}
 		}
-		if err := cluster.CreateCluster(); err != nil {
-			klog.Fatal(err)
-		}
-		if err := cluster.GenerateISO(); err != nil {
-			klog.Fatal(err)
-		}
-		if err := cluster.DownloadISO(); err != nil {
-			klog.Fatal(err)
+		if !clusterExists {
+			klog.Info("Creating Cluster")
+			if err := cluster.CreateCluster(); err != nil {
+				klog.Fatal(err)
+			}
+			klog.Info("Generating ISO")
+			if err := cluster.GenerateISO(); err != nil {
+				klog.Fatal(err)
+			}
+			klog.Info("Downloading ISO")
+			if err := cluster.DownloadISO(); err != nil {
+				klog.Fatal(err)
+			}
 		}
 
 		var infraInterface infrastructure.InfrastructureInterface
-		c := &cn2.CN2{}
+		c, err := cn2.New()
+		if err != nil {
+			klog.Fatal(err)
+		}
 		infraInterface = c
-		if err := infraInterface.PrepareStorage(infrastructure.Image{
+		klog.Info("Preparing Storage")
+		if err := infraInterface.CreateStorage(infrastructure.Image{
 			Name: cluster.Name,
 			Path: fmt.Sprintf("%s/.aicn2/%s.iso", homedir, cluster.Name),
 		}); err != nil {
 			klog.Fatal(err)
 		}
-
-		if err := cluster.Upload("manifests"); err != nil {
+		klog.Info("Creating VMs")
+		if err := infraInterface.CreateVMS(cluster.Name); err != nil {
 			klog.Fatal(err)
 		}
+		klog.Info("Creating DNS and LB")
+		if err := infraInterface.CreateDNSLB(cluster.Name); err != nil {
+			klog.Fatal(err)
+		}
+		/*
+			klog.Info("Uploading Manifests")
+			if err := cluster.Upload("manifests"); err != nil {
+				klog.Fatal(err)
+			}
+		*/
 	},
 }

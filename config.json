@@ -1,5 +1,5 @@
 {
-  "name": "oc",
+  "name": "oc2",
   "openshift_version": "4.8",
   "ocp_release_image": "quay.io/openshift-release-dev/ocp-release:4.8.4-x86_64",
   "base_dns_domain": "svc.cluster1.local",

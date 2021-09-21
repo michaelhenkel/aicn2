@@ -3,6 +3,8 @@ package utils
 import (
 	"io"
 	"net/http"
+
+	"k8s.io/klog"
 )
 
 func HttpRequest(endpoint string, m string, header map[string]string, content io.Reader, contentLength string) (*http.Response, error) {
@@ -36,6 +38,9 @@ func HttpRequest(endpoint string, m string, header map[string]string, content io
 	res, err := client.Do(r)
 	if err != nil {
 		return nil, err
+	}
+	if res.StatusCode != 200 {
+		klog.Error(res.StatusCode)
 	}
 	return res, nil
 }

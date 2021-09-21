@@ -30,20 +30,29 @@ var delete = &cobra.Command{
 					"accept":        "application/json",
 					"Authorization": fmt.Sprintf("Bearer %s", token),
 				}
-				_, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
+				resp, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
 				if err != nil {
-					klog.Fatal(err)
-				}
-				var infraInterface infrastructure.InfrastructureInterface
-				c := &cn2.CN2{}
-				infraInterface = c
-				if err := infraInterface.DeleteISO(infrastructure.Image{
-					Name: cl.Name,
-				}); err != nil {
-					klog.Fatal(err)
+					klog.Fatal(resp, err)
 				}
 
 			}
+		}
+		var infraInterface infrastructure.InfrastructureInterface
+		c, err := cn2.New()
+		if err != nil {
+			klog.Fatal(err)
+		}
+		infraInterface = c
+		if err := infraInterface.DeleteVMS(args[0]); err != nil {
+			klog.Fatal(err)
+		}
+		if err := infraInterface.DeleteDNSLB(args[0]); err != nil {
+			klog.Fatal(err)
+		}
+		if err := infraInterface.DeleteStorage(infrastructure.Image{
+			Name: args[0],
+		}); err != nil {
+			klog.Fatal(err)
 		}
 	},
 }
