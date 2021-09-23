@@ -10,7 +10,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "main.go",
-            "args": ["create","oc2","-f","config.json"]
+            "args": ["create","oc","-f","config.json"]
         },
         {
             "name": "list",
@@ -26,7 +26,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "main.go",
-            "args": ["upload","oc2"]
+            "args": ["upload","oc"]
         },
         {
             "name": "delete",
@@ -34,7 +34,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "main.go",
-            "args": ["delete","oc2"]
+            "args": ["delete","oc"]
         }
     ]
 }

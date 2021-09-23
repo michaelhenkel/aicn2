@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"io/ioutil"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ type Cluster struct {
 	token                      string
 	assistedServiceAPI         string
 	AmsSubscriptionID          string           `json:"ams_subscription_id"`
+	AdditionalNTPSource        string           `json:"additional_ntp_source"`
 	BaseDNSDomain              string           `json:"base_dns_domain"`
 	ClusterNetworkCidr         string           `json:"cluster_network_cidr"`
 	ClusterNetworkHostPrefix   int              `json:"cluster_network_host_prefix"`
@@ -252,7 +254,7 @@ func GetToken(offlineToken string) (string, error) {
 }
 
 func (c *Cluster) CreateCluster() error {
-	machineNetworkCidr := c.MachineNetworkCIDR
+	//machineNetworkCidr := c.MachineNetworkCIDR
 	clusterByte, err := json.Marshal(c)
 	if err != nil {
 		return err
@@ -276,32 +278,24 @@ func (c *Cluster) CreateCluster() error {
 		return err
 	}
 
-	data := map[string]string{"machine_network_cidr": machineNetworkCidr}
-	dataByte, err := json.Marshal(&data)
-	if err != nil {
-		return err
-	}
-	content = bytes.NewReader(dataByte)
-	contentLength = strconv.Itoa(len(dataByte))
+	newcontent := strings.NewReader(`"{\"networking\":{\"networkType\":\"Contrail\"}}"`)
 	header = map[string]string{
-		"accept":        "application/json",
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", c.token),
 	}
-	resp, err = utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters", c.assistedServiceAPI), "PATCH", header, content, contentLength)
+	resp, err = utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s/install-config", c.assistedServiceAPI, c.ID), http.MethodPatch, header, newcontent, "")
 	if err != nil {
 		klog.Info(resp)
 		return err
 	}
-	defer resp.Body.Close()
-	body, err = ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return err
+	if resp.StatusCode == 400 {
+		defer resp.Body.Close()
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		klog.Info(resp, string(body))
 	}
-	if err := json.Unmarshal(body, c); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -397,6 +391,59 @@ func (c *Cluster) Upload(manifestDirectory string) error {
 			klog.Error(resp)
 			return err
 		}
+	}
+	return nil
+}
+
+func (c *Cluster) SetMachineNetwork() error {
+	//newcontent := strings.NewReader(fmt.Sprintf(`"{\"machine_network_cidr\":\"%s\"}"`, c.MachineNetworkCIDR))
+	data := map[string]string{
+		"machine_network_cidr": c.MachineNetworkCIDR,
+	}
+	dataByte, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	content := bytes.NewReader(dataByte)
+	contentLength := strconv.Itoa(len(dataByte))
+	header := map[string]string{
+		"accept":        "application/json",
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", c.token),
+	}
+	resp, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", c.assistedServiceAPI, c.ID), http.MethodPatch, header, content, contentLength)
+	if err != nil {
+		klog.Info(resp)
+		return err
+	}
+	return nil
+}
+
+func (c *Cluster) WaitForReady(name string) error {
+	found := false
+	for !found {
+		cl, err := Get(name, c.token, c.assistedServiceAPI)
+		if err != nil {
+			return err
+		}
+		if cl.Status == "ready" {
+			found = true
+		}
+		time.Sleep(time.Second * 3)
+	}
+	return nil
+}
+
+func (c *Cluster) StartInstallation(name string) error {
+	header := map[string]string{
+		"accept":        "application/json",
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", c.token),
+	}
+	resp, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s/actions/install", c.assistedServiceAPI, c.ID), http.MethodPost, header, nil, "")
+	if err != nil {
+		klog.Info(resp)
+		return err
 	}
 	return nil
 }

@@ -71,6 +71,7 @@ var create = &cobra.Command{
 		for _, cl := range clusterList {
 			if cl.Name == cluster.Name {
 				clusterExists = true
+				cluster.ID = cl.ID
 			}
 		}
 		if !clusterExists {
@@ -101,6 +102,10 @@ var create = &cobra.Command{
 		}); err != nil {
 			klog.Fatal(err)
 		}
+		klog.Info("Creating VN")
+		if err := infraInterface.CreateVN(cluster.Name, cluster.MachineNetworkCIDR); err != nil {
+			klog.Fatal(err)
+		}
 		klog.Info("Creating VMs")
 		if err := infraInterface.CreateVMS(cluster.Name); err != nil {
 			klog.Fatal(err)
@@ -109,11 +114,23 @@ var create = &cobra.Command{
 		if err := infraInterface.CreateDNSLB(cluster.Name); err != nil {
 			klog.Fatal(err)
 		}
-		/*
-			klog.Info("Uploading Manifests")
-			if err := cluster.Upload("manifests"); err != nil {
-				klog.Fatal(err)
-			}
-		*/
+
+		klog.Info("Uploading Manifests")
+		if err := cluster.Upload("manifests"); err != nil {
+			klog.Fatal(err)
+		}
+
+		klog.Info("Setting MaschineNetwork")
+		if err := cluster.SetMachineNetwork(); err != nil {
+			klog.Fatal(err)
+		}
+		klog.Info("Waiting for Discovery")
+		if err := cluster.WaitForReady(cluster.Name); err != nil {
+			klog.Fatal(err)
+		}
+		klog.Info("Starting Installation")
+		if err := cluster.StartInstallation(cluster.Name); err != nil {
+			klog.Fatal(err)
+		}
 	},
 }

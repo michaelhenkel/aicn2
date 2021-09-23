@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
+	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog"
@@ -33,6 +34,37 @@ func New() (*CN2, error) {
 	return &CN2{
 		Client: client,
 	}, nil
+}
+
+func (c *CN2) CreateVN(name, subnet string) error {
+	if _, err := c.Client.Nad.K8sCniCncfIoV1().NetworkAttachmentDefinitions(name).Get(context.Background(), name, metav1.GetOptions{}); err != nil {
+		if errors.IsNotFound(err) {
+			nad := &nadv1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: name,
+					Annotations: map[string]string{
+						"juniper.net/networks": fmt.Sprintf(`{"ipamV4Subnet": "%s","fabricSNAT": true}`, subnet),
+					},
+				},
+				Spec: nadv1.NetworkAttachmentDefinitionSpec{
+					Config: `{"cniVersion": "0.3.1","name": "contrail-k8s-cni",	"type": "contrail-k8s-cni"}`,
+				},
+			}
+			_, err = c.Client.Nad.K8sCniCncfIoV1().NetworkAttachmentDefinitions(name).Create(context.Background(), nad, metav1.CreateOptions{})
+			if err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *CN2) DeleteVN(name string) error {
+	return nil
 }
 
 func (c *CN2) CreateDNSLB(name string) error {
@@ -141,6 +173,7 @@ func (c *CN2) DeleteDNSLB(name string) error {
 
 func defineVMI(name string) *kubevirtV1.VirtualMachineInstance {
 	var firstBootOrder uint = 1
+	var secondBootOrder uint = 2
 
 	return &kubevirtV1.VirtualMachineInstance{
 		ObjectMeta: metav1.ObjectMeta{
@@ -153,6 +186,13 @@ func defineVMI(name string) *kubevirtV1.VirtualMachineInstance {
 				Name: "default",
 				NetworkSource: kubevirtV1.NetworkSource{
 					Pod: &kubevirtV1.PodNetwork{},
+				},
+			}, {
+				Name: name,
+				NetworkSource: kubevirtV1.NetworkSource{
+					Multus: &kubevirtV1.MultusNetwork{
+						NetworkName: fmt.Sprintf("%s/%s", name, name),
+					},
 				},
 			}},
 			Domain: kubevirtV1.DomainSpec{
@@ -168,6 +208,11 @@ func defineVMI(name string) *kubevirtV1.VirtualMachineInstance {
 						InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
 							Bridge: &kubevirtV1.InterfaceBridge{},
 						},
+					}, {
+						Name: name,
+						InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
+							Bridge: &kubevirtV1.InterfaceBridge{},
+						},
 					}},
 					Disks: []kubevirtV1.Disk{{
 						Name: fmt.Sprintf("%s-iso", name),
@@ -176,7 +221,7 @@ func defineVMI(name string) *kubevirtV1.VirtualMachineInstance {
 								Bus: "sata",
 							},
 						},
-						BootOrder: &firstBootOrder,
+						BootOrder: &secondBootOrder,
 					}, {
 						Name: fmt.Sprintf("%s-disk", name),
 						DiskDevice: kubevirtV1.DiskDevice{
@@ -184,6 +229,7 @@ func defineVMI(name string) *kubevirtV1.VirtualMachineInstance {
 								Bus: "virtio",
 							},
 						},
+						BootOrder: &firstBootOrder,
 					}},
 				},
 			},
@@ -233,7 +279,7 @@ func (c *CN2) CreateStorage(image infrastructure.Image) error {
 		return err
 	}
 	if _, err := os.Stat(fmt.Sprintf("/var/glusterfsmnt/%s-iso/disk.img", image.Name)); os.IsNotExist(err) {
-		if _, err := fileCopy(image.Path, fmt.Sprintf("/var/glusterfsmnt/%s-iso/disk.img", image.Name)); err != nil {
+		if err := CopyFile(image.Path, fmt.Sprintf("/var/glusterfsmnt/%s-iso/disk.img", image.Name)); err != nil {
 			return err
 		}
 	}
@@ -249,7 +295,7 @@ func (c *CN2) DeleteStorage(image infrastructure.Image) error {
 		return err
 	}
 
-	if err := deleteGlusterFSVolumes(image.Name); err != nil {
+	if err := deleteGlusterFSVolumes(image.Name, image.Path); err != nil {
 		return err
 	}
 
@@ -431,7 +477,7 @@ func createGlusterFSVolumes(name string) error {
 		if err := os.Mkdir(fmt.Sprintf("/var/glusterfsmnt/%s-iso", name), 0777); err != nil {
 			return err
 		}
-		isoVolumeMountCommandString := fmt.Sprintf("mount -t glusterfs 5b3s30:/%s-iso /var/glusterfsmnt/%s-iso", name, name)
+		isoVolumeMountCommandString := fmt.Sprintf("mount -t glusterfs 5b3s30.cluster1.local:/%s-iso /var/glusterfsmnt/%s-iso", name, name)
 		stderr, err = runSudo(isoVolumeMountCommandString, "")
 		if err != nil {
 			klog.Error(stderr.String())
@@ -475,38 +521,20 @@ func createGlusterFSVolumes(name string) error {
 	return nil
 }
 
-func fileCopy(src, dst string) (int64, error) {
-	sourceFileStat, err := os.Stat(src)
-	if err != nil {
-		return 0, err
-	}
+func deleteGlusterFSVolumes(name, path string) error {
 
-	if !sourceFileStat.Mode().IsRegular() {
-		return 0, fmt.Errorf("%s is not a regular file", src)
-	}
-
-	source, err := os.Open(src)
-	if err != nil {
-		return 0, err
-	}
-	defer source.Close()
-
-	destination, err := os.Create(dst)
-	if err != nil {
-		return 0, err
-	}
-	defer destination.Close()
-	nBytes, err := io.Copy(destination, source)
-	return nBytes, err
-}
-
-func deleteGlusterFSVolumes(name string) error {
 	stderr, err := runSudo(fmt.Sprintf("umount /var/glusterfsmnt/%s-iso", name), "")
 	if err != nil {
-		if strings.Trim(stderr.String(), "\n") != fmt.Sprintf("umount: /var/glusterfsmnt/%s-iso: no mount point specified.", name) {
+		if strings.Trim(stderr.String(), "\n") != fmt.Sprintf("umount: /var/glusterfsmnt/%s-iso: not mounted.", name) {
 			klog.Error(stderr.String())
 			return err
 		}
+	}
+
+	stderr, err = runSudo(fmt.Sprintf("rm -rf /var/glusterfsmnt/%s-iso", name), "")
+	if err != nil {
+		klog.Error(stderr.String())
+		return err
 	}
 
 	stderr, err = runSudo(fmt.Sprintf("gluster volume stop %s-iso", name), "y")
@@ -545,6 +573,12 @@ func deleteGlusterFSVolumes(name string) error {
 		return err
 	}
 
+	stderr, err = runSudo(fmt.Sprintf("rm -rf %s", path), "")
+	if err != nil {
+		klog.Error(stderr.String())
+		return err
+	}
+
 	return nil
 }
 
@@ -574,4 +608,65 @@ func runSudo(command, input string) (bytes.Buffer, error) {
 		return errb, err
 	}
 	return outb, nil
+}
+
+// CopyFile copies a file from src to dst. If src and dst files exist, and are
+// the same, then return success. Otherise, attempt to create a hard link
+// between the two files. If that fail, copy the file contents from src to dst.
+func CopyFile(src, dst string) error {
+	sfi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !sfi.Mode().IsRegular() {
+		// cannot copy non-regular files (e.g., directories,
+		// symlinks, devices, etc.)
+		return fmt.Errorf("CopyFile: non-regular source file %s (%q)", sfi.Name(), sfi.Mode().String())
+	}
+	dfi, err := os.Stat(dst)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	} else {
+		if !(dfi.Mode().IsRegular()) {
+			return fmt.Errorf("CopyFile: non-regular destination file %s (%q)", dfi.Name(), dfi.Mode().String())
+		}
+		if os.SameFile(sfi, dfi) {
+			return nil
+		}
+	}
+	if err := copyFileContents(src, dst); err != nil {
+		return err
+	}
+	return nil
+}
+
+// copyFileContents copies the contents of the file named src to the file named
+// by dst. The file will be created if it does not already exist. If the
+// destination file exists, all it's contents will be replaced by the contents
+// of the source file.
+func copyFileContents(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		cerr := out.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		return err
+	}
+	return err
 }

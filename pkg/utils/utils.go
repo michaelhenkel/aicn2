@@ -7,7 +7,7 @@ import (
 	"k8s.io/klog"
 )
 
-func HttpRequest(endpoint string, m string, header map[string]string, content io.Reader, contentLength string) (*http.Response, error) {
+func HttpRequest(endpoint string, method string, header map[string]string, content io.Reader, contentLength string) (*http.Response, error) {
 	client := &http.Client{
 		CheckRedirect: func(r *http.Request, via []*http.Request) error {
 			if len(header) > 0 {
@@ -22,7 +22,7 @@ func HttpRequest(endpoint string, m string, header map[string]string, content io
 			return nil
 		},
 	}
-	r, err := http.NewRequest(m, endpoint, content) // URL-encoded payload
+	r, err := http.NewRequest(method, endpoint, content) // URL-encoded payload
 	if err != nil {
 		return nil, err
 	}
@@ -39,8 +39,9 @@ func HttpRequest(endpoint string, m string, header map[string]string, content io
 	if err != nil {
 		return nil, err
 	}
-	if res.StatusCode != 200 {
-		klog.Error(res.StatusCode)
+
+	if res.StatusCode == 405 {
+		klog.Info(res)
 	}
 	return res, nil
 }

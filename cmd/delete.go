@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	api "github.com/michaelhenkel/aicn2/pkg/apis"
 	"github.com/michaelhenkel/aicn2/pkg/cn2"
@@ -49,8 +50,16 @@ var delete = &cobra.Command{
 		if err := infraInterface.DeleteDNSLB(args[0]); err != nil {
 			klog.Fatal(err)
 		}
+		if err := infraInterface.DeleteVN(args[0]); err != nil {
+			klog.Fatal(err)
+		}
+		homedir, err := os.UserHomeDir()
+		if err != nil {
+			klog.Fatal(err)
+		}
 		if err := infraInterface.DeleteStorage(infrastructure.Image{
 			Name: args[0],
+			Path: fmt.Sprintf("%s/.aicn2/%s.iso", homedir, cluster.Name),
 		}); err != nil {
 			klog.Fatal(err)
 		}
