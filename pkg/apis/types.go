@@ -144,10 +144,12 @@ func NewCluster(token, assistedServiceAPI string) *Cluster {
 		BaseDNSDomain:      "cluster.local",
 		Hyperthreading:     "all",
 		ClusterNetworkCidr: "10.128.0.0/14",
-		ClusterNetworks: []ClusterNetwork{{
-			Cidr:       "10.233.64.0/18",
-			HostPrefix: 24,
-		}},
+		/*
+			ClusterNetworks: []ClusterNetwork{{
+				Cidr:       "10.128.0.0/14"",
+				HostPrefix: 24,
+			}},
+		*/
 		ClusterNetworkHostPrefix: 24,
 		ServiceNetworkCidr:       "172.30.0.0/16",
 		Networking: Networking{
@@ -278,12 +280,16 @@ func (c *Cluster) CreateCluster() error {
 		return err
 	}
 
+	return nil
+}
+
+func (c *Cluster) SetNetworkType() error {
 	newcontent := strings.NewReader(`"{\"networking\":{\"networkType\":\"Contrail\"}}"`)
-	header = map[string]string{
+	header := map[string]string{
 		"Content-Type":  "application/json",
 		"Authorization": fmt.Sprintf("Bearer %s", c.token),
 	}
-	resp, err = utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s/install-config", c.assistedServiceAPI, c.ID), http.MethodPatch, header, newcontent, "")
+	resp, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s/install-config", c.assistedServiceAPI, c.ID), http.MethodPatch, header, newcontent, "")
 	if err != nil {
 		klog.Info(resp)
 		return err

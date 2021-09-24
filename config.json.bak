@@ -1,16 +1,12 @@
 {
   "name": "oc",
-  "openshift_version": "4.8.10",
-  "ocp_release_image": "quay.io/openshift-release-dev/ocp-release:4.8.10-x86_64",
+  "openshift_version": "4.8",
+  "ocp_release_image": "quay.io/openshift-release-dev/ocp-release:4.8.4-x86_64",
   "base_dns_domain": "svc.cluster1.local",
   "cluster_network_cidr": "10.128.0.0/14",
   "cluster_network_host_prefix": 24,
   "service_network_cidr": "172.30.0.0/16",
   "high_availability_mode": "None",
   "machine_network_cidr": "10.233.64.0/18",
-  "additional_ntp_source": "10.84.5.100",
-  "hyperthreading": "all",
-  "vip_dhcp_allocation": false,
-  "user_managed_networking": true,
   "schedulable_masters": true
 }

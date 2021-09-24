@@ -1,14 +1,17 @@
-until ls /etc/kubernetes/bootstrap-secrets/aggregator-ca.crt; do
-  sleep 2
-done
-until ls /etc/kubernetes/bootstrap-secrets/kubeconfig; do
-  sleep 2
-done
-cat <<EOF>/tmp/patch
+#!/bin/bash
+success=0
+until [ $success -gt 1 ]; do
+  tmp=$(mktemp)
+  cat <<EOF>${tmp} || true
 data:
   requestheader-client-ca-file: |
 $(while IFS= read -a line; do echo "    $line"; done < <(cat /etc/kubernetes/bootstrap-secrets/aggregator-ca.crt))
 EOF
-until KUBECONFIG=/etc/kubernetes/bootstrap-secrets/kubeconfig kubectl -n kube-system patch configmap extension-apiserver-authentication --patch-file /tmp/patch; do
+  KUBECONFIG=/etc/kubernetes/bootstrap-secrets/kubeconfig kubectl -n kube-system patch configmap extension-apiserver-authentication --patch-file ${tmp}
+  if [[ $? -eq 0 ]]; then
+    rm ${tmp}
+    success=2
+  fi
+  rm ${tmp}
   sleep 2
 done

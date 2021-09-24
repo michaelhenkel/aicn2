@@ -26,6 +26,7 @@ func HttpRequest(endpoint string, method string, header map[string]string, conte
 	if err != nil {
 		return nil, err
 	}
+	r.Close = true
 	if len(header) > 0 {
 		for k, v := range header {
 			r.Header.Add(k, v)
@@ -40,8 +41,8 @@ func HttpRequest(endpoint string, method string, header map[string]string, conte
 		return nil, err
 	}
 
-	if res.StatusCode == 405 {
-		klog.Info(res)
+	if !(res.StatusCode == 200 || res.StatusCode == 201) {
+		klog.Error(res)
 	}
 	return res, nil
 }

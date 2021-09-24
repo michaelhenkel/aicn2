@@ -187,13 +187,15 @@ func defineVMI(name string) *kubevirtV1.VirtualMachineInstance {
 				NetworkSource: kubevirtV1.NetworkSource{
 					Pod: &kubevirtV1.PodNetwork{},
 				},
-			}, {
-				Name: name,
-				NetworkSource: kubevirtV1.NetworkSource{
-					Multus: &kubevirtV1.MultusNetwork{
-						NetworkName: fmt.Sprintf("%s/%s", name, name),
-					},
-				},
+				/*
+					}, {
+						Name: name,
+						NetworkSource: kubevirtV1.NetworkSource{
+							Multus: &kubevirtV1.MultusNetwork{
+								NetworkName: fmt.Sprintf("%s/%s", name, name),
+							},
+						},
+				*/
 			}},
 			Domain: kubevirtV1.DomainSpec{
 				Resources: kubevirtV1.ResourceRequirements{
@@ -208,11 +210,13 @@ func defineVMI(name string) *kubevirtV1.VirtualMachineInstance {
 						InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
 							Bridge: &kubevirtV1.InterfaceBridge{},
 						},
-					}, {
-						Name: name,
-						InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
-							Bridge: &kubevirtV1.InterfaceBridge{},
-						},
+						/*
+							}, {
+								Name: name,
+								InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
+									Bridge: &kubevirtV1.InterfaceBridge{},
+								},
+						*/
 					}},
 					Disks: []kubevirtV1.Disk{{
 						Name: fmt.Sprintf("%s-iso", name),

@@ -18,18 +18,10 @@ spec:
         - sh
         - -c
         - /manager --metrics-addr 127.0.0.1:8081
-        image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-deployer:ocp
+        image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-deployer:ocp2
         imagePullPolicy: Always
         name: contrail-k8s-deployer
       hostNetwork: true
-      initContainers:
-      - command:
-        - sh
-        - -c
-        - kustomize build /crd | kubectl apply -f -
-        image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-crdloader:ocp
-        imagePullPolicy: Always
-        name: contrail-k8s-crdloader
       nodeSelector:
         node-role.kubernetes.io/master: ""
       serviceAccountName: contrail-deploy-serviceaccount

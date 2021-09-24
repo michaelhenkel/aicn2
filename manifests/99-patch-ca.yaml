@@ -11,7 +11,7 @@ spec:
     storage:
       files:
       - contents:
-          source: data:text/plain;charset=utf-8;base64,dW50aWwgbHMgL2V0Yy9rdWJlcm5ldGVzL2Jvb3RzdHJhcC1zZWNyZXRzL2FnZ3JlZ2F0b3ItY2EuY3J0OyBkbwogIHNsZWVwIDIKZG9uZQp1bnRpbCBscyAvZXRjL2t1YmVybmV0ZXMvYm9vdHN0cmFwLXNlY3JldHMva3ViZWNvbmZpZzsgZG8KICBzbGVlcCAyCmRvbmUKY2F0IDw8RU9GPi90bXAvcGF0Y2gKZGF0YToKICByZXF1ZXN0aGVhZGVyLWNsaWVudC1jYS1maWxlOiB8CiQod2hpbGUgSUZTPSByZWFkIC1hIGxpbmU7IGRvIGVjaG8gIiAgICAkbGluZSI7IGRvbmUgPCA8KGNhdCAvZXRjL2t1YmVybmV0ZXMvYm9vdHN0cmFwLXNlY3JldHMvYWdncmVnYXRvci1jYS5jcnQpKQpFT0YKdW50aWwgS1VCRUNPTkZJRz0vZXRjL2t1YmVybmV0ZXMvYm9vdHN0cmFwLXNlY3JldHMva3ViZWNvbmZpZyBrdWJlY3RsIC1uIGt1YmUtc3lzdGVtIHBhdGNoIGNvbmZpZ21hcCBleHRlbnNpb24tYXBpc2VydmVyLWF1dGhlbnRpY2F0aW9uIC0tcGF0Y2gtZmlsZSAvdG1wL3BhdGNoOyBkbwogIHNsZWVwIDIKZG9uZQo=
+          source: data:text/plain;charset=utf-8;base64,IyEvYmluL2Jhc2gKc3VjY2Vzcz0wCnVudGlsIFsgJHN1Y2Nlc3MgLWd0IDEgXTsgZG8KICB0bXA9JChta3RlbXApCiAgY2F0IDw8RU9GPiR7dG1wfSB8fCB0cnVlCmRhdGE6CiAgcmVxdWVzdGhlYWRlci1jbGllbnQtY2EtZmlsZTogfAokKHdoaWxlIElGUz0gcmVhZCAtYSBsaW5lOyBkbyBlY2hvICIgICAgJGxpbmUiOyBkb25lIDwgPChjYXQgL2V0Yy9rdWJlcm5ldGVzL2Jvb3RzdHJhcC1zZWNyZXRzL2FnZ3JlZ2F0b3ItY2EuY3J0KSkKRU9GCiAgS1VCRUNPTkZJRz0vZXRjL2t1YmVybmV0ZXMvYm9vdHN0cmFwLXNlY3JldHMva3ViZWNvbmZpZyBrdWJlY3RsIC1uIGt1YmUtc3lzdGVtIHBhdGNoIGNvbmZpZ21hcCBleHRlbnNpb24tYXBpc2VydmVyLWF1dGhlbnRpY2F0aW9uIC0tcGF0Y2gtZmlsZSAke3RtcH0KICBpZiBbWyAkPyAtZXEgMCBdXTsgdGhlbgogICAgcm0gJHt0bXB9CiAgICBzdWNjZXNzPTIKICBmaQogIHJtICR7dG1wfQogIHNsZWVwIDIKZG9uZQo=
         mode: 0755
         overwrite: true
         path: /usr/local/bin/patch.sh
@@ -22,9 +22,9 @@ spec:
           Description=patch
           After=kubelet.service
           [Service]
+          RemainAfterExit=true
           Type=oneshot
-          ExecStart=/usr/local/bin/patch.sh
-          ExecStart=systemctl daemon-reload
+          ExecStart=sh -c /usr/local/bin/patch.sh
           [Install]
           WantedBy=multi-user.target
         enabled: true

@@ -79,13 +79,27 @@ var create = &cobra.Command{
 			if err := cluster.CreateCluster(); err != nil {
 				klog.Fatal(err)
 			}
+			klog.Info("Setting Network Type")
+			if err := cluster.SetNetworkType(); err != nil {
+				klog.Fatal(err)
+			}
 			klog.Info("Generating ISO")
 			if err := cluster.GenerateISO(); err != nil {
 				klog.Fatal(err)
 			}
 			klog.Info("Downloading ISO")
-			if err := cluster.DownloadISO(); err != nil {
-				klog.Fatal(err)
+			success := false
+			counter := 1
+			for !success {
+				if err := cluster.DownloadISO(); err != nil {
+					klog.Errorf("%d attempt of 5 failed with err %+v. Retrying\n", counter, err)
+					if counter == 5 {
+						klog.Fatal(err)
+					}
+					counter++
+				} else {
+					success = true
+				}
 			}
 		}
 
@@ -124,13 +138,16 @@ var create = &cobra.Command{
 		if err := cluster.SetMachineNetwork(); err != nil {
 			klog.Fatal(err)
 		}
+
 		klog.Info("Waiting for Discovery")
 		if err := cluster.WaitForReady(cluster.Name); err != nil {
 			klog.Fatal(err)
 		}
+
 		klog.Info("Starting Installation")
 		if err := cluster.StartInstallation(cluster.Name); err != nil {
 			klog.Fatal(err)
 		}
+
 	},
 }
