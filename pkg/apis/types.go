@@ -20,6 +20,10 @@ import (
 	"k8s.io/klog"
 )
 
+type Host struct {
+	Role string `json:"role"`
+}
+
 type ClusterNetwork struct {
 	Cidr       string `json:"cidr"`
 	ClusterID  string `json:"cluster_id"`

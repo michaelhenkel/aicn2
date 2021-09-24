@@ -35,6 +35,14 @@
             "mode": "auto",
             "program": "main.go",
             "args": ["delete","oc"]
+        },
+        {
+            "name": "kubeconfig",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "main.go",
+            "args": ["kubeconfig","oc"]
         }
     ]
 }

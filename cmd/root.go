@@ -45,6 +45,7 @@ func init() {
 	rootCmd.AddCommand(list)
 	rootCmd.AddCommand(upload)
 	rootCmd.AddCommand(getmanifests)
+	rootCmd.AddCommand(kubeconfig)
 }
 
 func initConfig() {

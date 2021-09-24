@@ -103,7 +103,7 @@ func (c *CN2) CreateDNSLB(name string) error {
 					IntVal: 80,
 				},
 			}},
-			Selector: map[string]string{"occluster": name},
+			Selector: map[string]string{"occluster": name, "role": "controller"},
 		},
 	}
 	if _, err := c.Client.K8S.CoreV1().Services(name).Create(context.Background(), apiSvc, metav1.CreateOptions{}); err != nil {
@@ -146,7 +146,7 @@ func (c *CN2) CreateDNSLB(name string) error {
 					IntVal: 80,
 				},
 			}},
-			Selector: map[string]string{"occluster": name},
+			Selector: map[string]string{"occluster": name, "role": "controller"},
 		},
 	}
 	if _, err := c.Client.K8S.CoreV1().Services(name).Create(context.Background(), intApiSvc, metav1.CreateOptions{}); err != nil {
@@ -171,15 +171,15 @@ func (c *CN2) DeleteDNSLB(name string) error {
 	return nil
 }
 
-func defineVMI(name string) *kubevirtV1.VirtualMachineInstance {
+func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstance {
 	var firstBootOrder uint = 1
 	var secondBootOrder uint = 2
 
 	return &kubevirtV1.VirtualMachineInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: name,
-			Labels:    map[string]string{"occluster": name},
+			Namespace: clustername,
+			Labels:    map[string]string{"occluster": clustername, "role": role},
 		},
 		Spec: kubevirtV1.VirtualMachineInstanceSpec{
 			Networks: []kubevirtV1.Network{{
@@ -258,11 +258,23 @@ func defineVMI(name string) *kubevirtV1.VirtualMachineInstance {
 	}
 }
 
-func (c *CN2) CreateVMS(name string) error {
-	vmi := defineVMI(name)
-	if _, err := c.Client.Kubevirt.VirtualMachineInstance(name).Create(vmi); err != nil {
-		if !errors.IsAlreadyExists(err) {
-			return err
+func (c *CN2) CreateVMS(name string, controller int, worker int) error {
+	for i := 0; i < controller; i++ {
+		nodename := fmt.Sprintf("%s-controller-%d", name, i)
+		vmi := defineVMI(nodename, name, "controller")
+		if _, err := c.Client.Kubevirt.VirtualMachineInstance(nodename).Create(vmi); err != nil {
+			if !errors.IsAlreadyExists(err) {
+				return err
+			}
+		}
+	}
+	for i := 0; i < worker; i++ {
+		nodename := fmt.Sprintf("%s-worker-%d", name, i)
+		vmi := defineVMI(nodename, name, "worker")
+		if _, err := c.Client.Kubevirt.VirtualMachineInstance(nodename).Create(vmi); err != nil {
+			if !errors.IsAlreadyExists(err) {
+				return err
+			}
 		}
 	}
 	return nil
@@ -277,37 +289,73 @@ func (c *CN2) DeleteVMS(name string) error {
 	return nil
 }
 
-func (c *CN2) CreateStorage(image infrastructure.Image) error {
-
-	if err := createGlusterFSVolumes(image.Name); err != nil {
-		return err
-	}
-	if _, err := os.Stat(fmt.Sprintf("/var/glusterfsmnt/%s-iso/disk.img", image.Name)); os.IsNotExist(err) {
-		if err := CopyFile(image.Path, fmt.Sprintf("/var/glusterfsmnt/%s-iso/disk.img", image.Name)); err != nil {
+func (c *CN2) CreateStorage(image infrastructure.Image, controller int, worker int) error {
+	if _, err := os.Stat(image.Path); os.IsNotExist(err) {
+		if err := os.Mkdir(image.Path, 0755); err != nil {
 			return err
 		}
 	}
 
-	if err := c.createPVandPVC(image.Name); err != nil {
-		return err
+	for i := 0; i < controller; i++ {
+		nodename := fmt.Sprintf("%s-controller-%d", image.Name, i)
+		if err := createGlusterFSVolumes(nodename); err != nil {
+			return err
+		}
+		if _, err := os.Stat(fmt.Sprintf("/var/glusterfsmnt/%s-iso/disk.img", nodename)); os.IsNotExist(err) {
+			if err := CopyFile(image.Path, fmt.Sprintf("/var/glusterfsmnt/%s-iso/disk.img", nodename)); err != nil {
+				return err
+			}
+		}
+
+		if err := c.createPVandPVC(nodename, image.Name); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < worker; i++ {
+		nodename := fmt.Sprintf("%s-worker-%d", image.Name, i)
+		if err := createGlusterFSVolumes(nodename); err != nil {
+			return err
+		}
+		if _, err := os.Stat(fmt.Sprintf("/var/glusterfsmnt/%s-iso/disk.img", nodename)); os.IsNotExist(err) {
+			if err := CopyFile(image.Path, fmt.Sprintf("/var/glusterfsmnt/%s-iso/disk.img", nodename)); err != nil {
+				return err
+			}
+		}
+
+		if err := c.createPVandPVC(nodename, image.Name); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (c *CN2) DeleteStorage(image infrastructure.Image) error {
-	if err := c.deletePVandPVC(image.Name); err != nil {
-		return err
-	}
+func (c *CN2) DeleteStorage(image infrastructure.Image, controller int, worker int) error {
+	for i := 0; i < controller; i++ {
+		nodename := fmt.Sprintf("%s-controller-%d", image.Name, i)
+		if err := c.deletePVandPVC(nodename, image.Name); err != nil {
+			return err
+		}
 
-	if err := deleteGlusterFSVolumes(image.Name, image.Path); err != nil {
-		return err
+		if err := deleteGlusterFSVolumes(nodename, image.Path); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < worker; i++ {
+		nodename := fmt.Sprintf("%s-worker-%d", image.Name, i)
+		if err := c.deletePVandPVC(nodename, image.Name); err != nil {
+			return err
+		}
+
+		if err := deleteGlusterFSVolumes(nodename, image.Path); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (c *CN2) deletePVandPVC(name string) error {
-	if err := c.Client.K8S.CoreV1().PersistentVolumeClaims(name).Delete(context.Background(), fmt.Sprintf("%s-iso", name), metav1.DeleteOptions{}); err != nil {
+func (c *CN2) deletePVandPVC(name, namespace string) error {
+	if err := c.Client.K8S.CoreV1().PersistentVolumeClaims(namespace).Delete(context.Background(), fmt.Sprintf("%s-iso", name), metav1.DeleteOptions{}); err != nil {
 		if !errors.IsNotFound(err) {
 			return err
 		}
@@ -319,7 +367,7 @@ func (c *CN2) deletePVandPVC(name string) error {
 		}
 	}
 
-	if err := c.Client.K8S.CoreV1().PersistentVolumeClaims(name).Delete(context.Background(), fmt.Sprintf("%s-disk", name), metav1.DeleteOptions{}); err != nil {
+	if err := c.Client.K8S.CoreV1().PersistentVolumeClaims(namespace).Delete(context.Background(), fmt.Sprintf("%s-disk", name), metav1.DeleteOptions{}); err != nil {
 		if !errors.IsNotFound(err) {
 			return err
 		}
@@ -340,10 +388,10 @@ func (c *CN2) deletePVandPVC(name string) error {
 	return nil
 }
 
-func (c *CN2) createPVandPVC(name string) error {
+func (c *CN2) createPVandPVC(name, namespace string) error {
 	ns := &v1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name: namespace,
 		},
 	}
 	if _, err := c.Client.K8S.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{}); err != nil {
@@ -355,7 +403,7 @@ func (c *CN2) createPVandPVC(name string) error {
 	isoPV := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-iso", name),
-			Namespace: name,
+			Namespace: namespace,
 		},
 		Spec: v1.PersistentVolumeSpec{
 			Capacity: v1.ResourceList{
@@ -381,7 +429,7 @@ func (c *CN2) createPVandPVC(name string) error {
 	isoPVC := &v1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-iso", name),
-			Namespace: name,
+			Namespace: namespace,
 		},
 		Spec: v1.PersistentVolumeClaimSpec{
 			AccessModes: []v1.PersistentVolumeAccessMode{"ReadWriteMany"},
@@ -393,7 +441,7 @@ func (c *CN2) createPVandPVC(name string) error {
 		},
 	}
 
-	if _, err := c.Client.K8S.CoreV1().PersistentVolumeClaims(name).Create(context.Background(), isoPVC, metav1.CreateOptions{}); err != nil {
+	if _, err := c.Client.K8S.CoreV1().PersistentVolumeClaims(namespace).Create(context.Background(), isoPVC, metav1.CreateOptions{}); err != nil {
 		if !errors.IsAlreadyExists(err) {
 			return err
 		}
@@ -402,7 +450,7 @@ func (c *CN2) createPVandPVC(name string) error {
 	diskPV := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-disk", name),
-			Namespace: name,
+			Namespace: namespace,
 		},
 		Spec: v1.PersistentVolumeSpec{
 			Capacity: v1.ResourceList{
@@ -428,7 +476,7 @@ func (c *CN2) createPVandPVC(name string) error {
 	diskPVC := &v1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-disk", name),
-			Namespace: name,
+			Namespace: namespace,
 		},
 		Spec: v1.PersistentVolumeClaimSpec{
 			AccessModes: []v1.PersistentVolumeAccessMode{"ReadWriteMany"},
@@ -439,7 +487,7 @@ func (c *CN2) createPVandPVC(name string) error {
 			},
 		},
 	}
-	if _, err := c.Client.K8S.CoreV1().PersistentVolumeClaims(name).Create(context.Background(), diskPVC, metav1.CreateOptions{}); err != nil {
+	if _, err := c.Client.K8S.CoreV1().PersistentVolumeClaims(namespace).Create(context.Background(), diskPVC, metav1.CreateOptions{}); err != nil {
 		if !errors.IsAlreadyExists(err) {
 			return err
 		}

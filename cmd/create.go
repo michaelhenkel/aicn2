@@ -14,12 +14,16 @@ import (
 )
 
 var (
-	file  string
-	noiso bool
+	file       string
+	noiso      bool
+	worker     int
+	controller int
 )
 
 func init() {
 	create.PersistentFlags().StringVarP(&file, "file", "f", "", "access token file")
+	create.PersistentFlags().IntVarP(&worker, "worker", "w", 0, "worker count")
+	create.PersistentFlags().IntVarP(&controller, "controller", "c", 1, "controller count")
 	create.PersistentFlags().BoolVar(&noiso, "noiso", false, "don't create iso")
 }
 
@@ -112,8 +116,8 @@ var create = &cobra.Command{
 		klog.Info("Preparing Storage")
 		if err := infraInterface.CreateStorage(infrastructure.Image{
 			Name: cluster.Name,
-			Path: fmt.Sprintf("%s/.aicn2/%s.iso", homedir, cluster.Name),
-		}); err != nil {
+			Path: fmt.Sprintf("%s/.aicn2/%s", homedir, cluster.Name),
+		}, controller, worker); err != nil {
 			klog.Fatal(err)
 		}
 		klog.Info("Creating VN")
@@ -121,7 +125,7 @@ var create = &cobra.Command{
 			klog.Fatal(err)
 		}
 		klog.Info("Creating VMs")
-		if err := infraInterface.CreateVMS(cluster.Name); err != nil {
+		if err := infraInterface.CreateVMS(cluster.Name, controller, worker); err != nil {
 			klog.Fatal(err)
 		}
 		klog.Info("Creating DNS and LB")
