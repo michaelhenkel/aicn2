@@ -6,7 +6,7 @@ type InfrastructureInterface interface {
 	CreateVMS(name string, controller int, worker int) error
 	CreateDNSLB(name string) error
 	DeleteStorage(image Image, controller int, worker int) error
-	DeleteVMS(name string) error
+	DeleteVMS(name string, controller int, worker int) error
 	DeleteDNSLB(name string) error
 	DeleteVN(name string) error
 }

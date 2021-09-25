@@ -41,7 +41,7 @@ func HttpRequest(endpoint string, method string, header map[string]string, conte
 		return nil, err
 	}
 
-	if !(res.StatusCode == 200 || res.StatusCode == 201) {
+	if !(res.StatusCode == 200 || res.StatusCode == 201 || res.StatusCode == 204) {
 		klog.Error(res)
 	}
 	return res, nil

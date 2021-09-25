@@ -6,8 +6,9 @@
   "cluster_network_cidr": "10.128.0.0/14",
   "cluster_network_host_prefix": 24,
   "service_network_cidr": "172.30.0.0/16",
-  "high_availability_mode": "None",
-  "machine_network_cidr": "10.233.64.0/18",
+  "machine_networks": [{
+    "cidr": "10.233.64.0/18"
+  }],
   "additional_ntp_source": "10.84.5.100",
   "hyperthreading": "all",
   "vip_dhcp_allocation": false,

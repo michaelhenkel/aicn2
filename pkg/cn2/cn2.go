@@ -262,7 +262,7 @@ func (c *CN2) CreateVMS(name string, controller int, worker int) error {
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", name, i)
 		vmi := defineVMI(nodename, name, "controller")
-		if _, err := c.Client.Kubevirt.VirtualMachineInstance(nodename).Create(vmi); err != nil {
+		if _, err := c.Client.Kubevirt.VirtualMachineInstance(name).Create(vmi); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err
 			}
@@ -271,7 +271,7 @@ func (c *CN2) CreateVMS(name string, controller int, worker int) error {
 	for i := 0; i < worker; i++ {
 		nodename := fmt.Sprintf("%s-worker-%d", name, i)
 		vmi := defineVMI(nodename, name, "worker")
-		if _, err := c.Client.Kubevirt.VirtualMachineInstance(nodename).Create(vmi); err != nil {
+		if _, err := c.Client.Kubevirt.VirtualMachineInstance(name).Create(vmi); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err
 			}
@@ -280,21 +280,27 @@ func (c *CN2) CreateVMS(name string, controller int, worker int) error {
 	return nil
 }
 
-func (c *CN2) DeleteVMS(name string) error {
-	if err := c.Client.Kubevirt.VirtualMachineInstance(name).Delete(name, &metav1.DeleteOptions{}); err != nil {
-		if !errors.IsNotFound(err) {
-			return err
+func (c *CN2) DeleteVMS(name string, controller, worker int) error {
+	for i := 0; i < controller; i++ {
+		nodename := fmt.Sprintf("%s-controller-%d", name, i)
+		if err := c.Client.Kubevirt.VirtualMachineInstance(name).Delete(nodename, &metav1.DeleteOptions{}); err != nil {
+			if !errors.IsNotFound(err) {
+				return err
+			}
+		}
+	}
+	for i := 0; i < worker; i++ {
+		nodename := fmt.Sprintf("%s-worker-%d", name, i)
+		if err := c.Client.Kubevirt.VirtualMachineInstance(name).Delete(nodename, &metav1.DeleteOptions{}); err != nil {
+			if !errors.IsNotFound(err) {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
 func (c *CN2) CreateStorage(image infrastructure.Image, controller int, worker int) error {
-	if _, err := os.Stat(image.Path); os.IsNotExist(err) {
-		if err := os.Mkdir(image.Path, 0755); err != nil {
-			return err
-		}
-	}
 
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", image.Name, i)
@@ -574,62 +580,65 @@ func createGlusterFSVolumes(name string) error {
 }
 
 func deleteGlusterFSVolumes(name, path string) error {
+	if _, err := os.Stat(fmt.Sprintf("/var/glusterfsmnt/%s-iso", name)); err == nil {
+		stderr, err := runSudo(fmt.Sprintf("umount /var/glusterfsmnt/%s-iso", name), "")
+		if err != nil {
+			if strings.Trim(stderr.String(), "\n") != fmt.Sprintf("umount: /var/glusterfsmnt/%s-iso: not mounted.", name) {
+				klog.Error(stderr.String())
+				return err
+			}
+		}
 
-	stderr, err := runSudo(fmt.Sprintf("umount /var/glusterfsmnt/%s-iso", name), "")
-	if err != nil {
-		if strings.Trim(stderr.String(), "\n") != fmt.Sprintf("umount: /var/glusterfsmnt/%s-iso: not mounted.", name) {
+		stderr, err = runSudo(fmt.Sprintf("rm -rf /var/glusterfsmnt/%s-iso", name), "")
+		if err != nil {
+			klog.Error(stderr.String())
+			return err
+		}
+
+		stderr, err = runSudo(fmt.Sprintf("gluster volume stop %s-iso", name), "y")
+		if err != nil {
+			klog.Error(stderr.String())
+			return err
+		}
+
+		stderr, err = runSudo(fmt.Sprintf("gluster volume delete %s-iso", name), "y")
+		if err != nil {
+			klog.Error(stderr.String())
+			return err
+		}
+
+		stderr, err = runSudo(fmt.Sprintf("rm -rf /glusterfs/%s-iso", name), "")
+		if err != nil {
+			klog.Error(stderr.String())
+			return err
+		}
+
+		stderr, err = runSudo(fmt.Sprintf("gluster volume stop %s-disk", name), "y")
+		if err != nil {
+			klog.Error(stderr.String())
+			return err
+		}
+
+		stderr, err = runSudo(fmt.Sprintf("gluster volume delete %s-disk", name), "y")
+		if err != nil {
+			klog.Error(stderr.String())
+			return err
+		}
+
+		stderr, err = runSudo(fmt.Sprintf("rm -rf /glusterfs/%s-disk", name), "")
+		if err != nil {
 			klog.Error(stderr.String())
 			return err
 		}
 	}
 
-	stderr, err = runSudo(fmt.Sprintf("rm -rf /var/glusterfsmnt/%s-iso", name), "")
-	if err != nil {
-		klog.Error(stderr.String())
-		return err
-	}
-
-	stderr, err = runSudo(fmt.Sprintf("gluster volume stop %s-iso", name), "y")
-	if err != nil {
-		klog.Error(stderr.String())
-		return err
-	}
-
-	stderr, err = runSudo(fmt.Sprintf("gluster volume delete %s-iso", name), "y")
-	if err != nil {
-		klog.Error(stderr.String())
-		return err
-	}
-
-	stderr, err = runSudo(fmt.Sprintf("rm -rf /glusterfs/%s-iso", name), "")
-	if err != nil {
-		klog.Error(stderr.String())
-		return err
-	}
-
-	stderr, err = runSudo(fmt.Sprintf("gluster volume stop %s-disk", name), "y")
-	if err != nil {
-		klog.Error(stderr.String())
-		return err
-	}
-
-	stderr, err = runSudo(fmt.Sprintf("gluster volume delete %s-disk", name), "y")
-	if err != nil {
-		klog.Error(stderr.String())
-		return err
-	}
-
-	stderr, err = runSudo(fmt.Sprintf("rm -rf /glusterfs/%s-disk", name), "")
-	if err != nil {
-		klog.Error(stderr.String())
-		return err
-	}
-
-	stderr, err = runSudo(fmt.Sprintf("rm -rf %s", path), "")
-	if err != nil {
-		klog.Error(stderr.String())
-		return err
-	}
+	/*
+		stderr, err = runSudo(fmt.Sprintf("rm -rf %s", path), "")
+		if err != nil {
+			klog.Error(stderr.String())
+			return err
+		}
+	*/
 
 	return nil
 }

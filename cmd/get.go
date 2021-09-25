@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
 	api "github.com/michaelhenkel/aicn2/pkg/apis"
+	"github.com/openshift/assisted-service/client/installer"
+	"github.com/openshift/assisted-service/models"
 	"github.com/spf13/cobra"
 	"k8s.io/klog"
 )
@@ -17,14 +20,27 @@ var get = &cobra.Command{
 		if len(args) != 1 {
 			klog.Fatal("name is missing")
 		}
-		cluster, err := api.Get(args[0], token, assistedServiceAPI)
+		client, err := api.NewClient(token)
 		if err != nil {
 			klog.Fatal(err)
 		}
-		clusterByte, err := json.Marshal(cluster)
+		clusterList, err := client.Installer.ListClusters(context.Background(), &installer.ListClustersParams{})
 		if err != nil {
 			klog.Fatal(err)
 		}
-		fmt.Println(string(clusterByte))
+
+		var cluster *models.Cluster
+		for _, cl := range clusterList.GetPayload() {
+			if cl.Name == args[0] {
+				cluster = cl
+			}
+		}
+		if cluster != nil {
+			clusterByte, err := json.Marshal(cluster)
+			if err != nil {
+				klog.Fatal(err)
+			}
+			fmt.Println(string(clusterByte))
+		}
 	},
 }

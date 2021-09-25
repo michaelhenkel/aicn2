@@ -3,17 +3,15 @@ module github.com/michaelhenkel/aicn2
 go 1.16
 
 require (
-	github.com/imdario/mergo v0.3.11 // indirect
+	github.com/go-openapi/runtime v0.19.31
+	github.com/go-openapi/strfmt v0.20.2 // indirect
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.1.0
-	github.com/kr/text v0.2.0 // indirect
-	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
-	github.com/onsi/ginkgo v1.14.2 // indirect
-	github.com/onsi/gomega v1.10.3 // indirect
+	github.com/openshift/assisted-service v1.0.10-0.20210825070125-6ba8da87d788
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/spf13/cobra v1.2.1
-	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
-	k8s.io/api v0.20.2
-	k8s.io/apimachinery v0.20.2
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
+	k8s.io/api v0.21.1
+	k8s.io/apimachinery v0.21.1
 	k8s.io/client-go v12.0.0+incompatible
 	k8s.io/klog v1.0.0
 	k8s.io/klog/v2 v2.10.0 // indirect
@@ -60,6 +58,8 @@ replace (
 	k8s.io/sample-cli-plugin => k8s.io/sample-cli-plugin v0.20.2
 	k8s.io/sample-controller => k8s.io/sample-controller v0.20.2
 	kubevirt.io/containerized-data-importer => kubevirt.io/containerized-data-importer v1.37.1
+	sigs.k8s.io/cluster-api-provider-aws => github.com/openshift/cluster-api-provider-aws v0.2.1-0.20201022175424-d30c7a274820
+	sigs.k8s.io/cluster-api-provider-azure => github.com/openshift/cluster-api-provider-azure v0.1.0-alpha.3.0.20201016155852-4090a6970205
 	sigs.k8s.io/structured-merge-diff => sigs.k8s.io/structured-merge-diff v0.0.0-20190302045857-e85c7b244fd2
 	ssd-git.juniper.net/contrail/cn2/contrail => ../../../ssd-git.juniper.net/contrail/cn2/contrail
 

@@ -1,18 +1,23 @@
 package cmd
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	api "github.com/michaelhenkel/aicn2/pkg/apis"
 	"github.com/michaelhenkel/aicn2/pkg/cn2"
 	"github.com/michaelhenkel/aicn2/pkg/infrastructure"
-	"github.com/michaelhenkel/aicn2/pkg/utils"
+	"github.com/openshift/assisted-service/client/installer"
+	"github.com/openshift/assisted-service/models"
 	"github.com/spf13/cobra"
 	"k8s.io/klog"
 )
+
+func init() {
+	delete.PersistentFlags().IntVarP(&worker, "worker", "w", 0, "worker count")
+	delete.PersistentFlags().IntVarP(&controller, "controller", "c", 0, "controller count")
+}
 
 var delete = &cobra.Command{
 	Use:   "delete [name]",
@@ -22,52 +27,43 @@ var delete = &cobra.Command{
 		if len(args) != 1 {
 			klog.Fatal("name is missing")
 		}
-		cluster := api.NewCluster(token, assistedServiceAPI)
-		clusterList, err := cluster.List()
+
+		client, err := api.NewClient(token)
 		if err != nil {
 			klog.Fatal(err)
 		}
+		clusterList, err := client.Installer.ListClusters(context.Background(), &installer.ListClustersParams{})
+		if err != nil {
+			klog.Fatal(err)
+		}
+
 		workerCounter := 0
 		controllerCounter := 0
-		for _, cl := range clusterList {
+		var cluster *models.Cluster
+		for _, cl := range clusterList.GetPayload() {
 			if cl.Name == args[0] {
-
-				header := map[string]string{
-					"accept":        "application/json",
-					"Authorization": fmt.Sprintf("Bearer %s", token),
-				}
-				resp, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v2/infra-envs//%s/hosts", assistedServiceAPI, cl.ID), "GET", header, nil, "")
-				if err != nil {
-					klog.Fatal(resp, err)
-				}
-				h := []api.Host{}
-				defer resp.Body.Close()
-				body, err := ioutil.ReadAll(resp.Body)
-				if err != nil {
-					klog.Fatal(err)
-				}
-				if err := json.Unmarshal(body, &h); err != nil {
-					klog.Fatal(err)
-				}
-				for _, host := range h {
-					if host.Role == "master" {
-						controllerCounter++
-					}
+				cluster = cl
+				hostList := cluster.Hosts
+				for _, host := range hostList {
 					if host.Role == "worker" {
 						workerCounter++
 					}
+					if host.Role == "master" {
+						controllerCounter++
+					}
 				}
-
-				header = map[string]string{
-					"accept":        "application/json",
-					"Authorization": fmt.Sprintf("Bearer %s", token),
+				if _, err := client.Installer.DeregisterCluster(context.Background(), &installer.DeregisterClusterParams{
+					ClusterID: *cluster.ID,
+				}); err != nil {
+					klog.Fatal(err)
 				}
-				resp, err = utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
-				if err != nil {
-					klog.Fatal(resp, err)
-				}
-
 			}
+		}
+		if worker != 0 {
+			workerCounter = worker
+		}
+		if controller != 0 {
+			controllerCounter = controller
 		}
 		var infraInterface infrastructure.InfrastructureInterface
 		c, err := cn2.New()
@@ -75,7 +71,7 @@ var delete = &cobra.Command{
 			klog.Fatal(err)
 		}
 		infraInterface = c
-		if err := infraInterface.DeleteVMS(args[0]); err != nil {
+		if err := infraInterface.DeleteVMS(args[0], controllerCounter, workerCounter); err != nil {
 			klog.Fatal(err)
 		}
 		if err := infraInterface.DeleteDNSLB(args[0]); err != nil {
@@ -90,7 +86,7 @@ var delete = &cobra.Command{
 		}
 		if err := infraInterface.DeleteStorage(infrastructure.Image{
 			Name: args[0],
-			Path: fmt.Sprintf("%s/.aicn2/%s.iso", homedir, cluster.Name),
+			Path: fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, cluster.Name),
 		}, controllerCounter, workerCounter); err != nil {
 			klog.Fatal(err)
 		}
