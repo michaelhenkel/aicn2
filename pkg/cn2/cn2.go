@@ -182,6 +182,13 @@ func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstanc
 			Labels:    map[string]string{"occluster": clustername, "role": role},
 		},
 		Spec: kubevirtV1.VirtualMachineInstanceSpec{
+			ReadinessProbe: &kubevirtV1.Probe{
+				Handler: kubevirtV1.Handler{
+					TCPSocket: &v1.TCPSocketAction{
+						Port: intstr.FromInt(6443),
+					},
+				},
+			},
 			Networks: []kubevirtV1.Network{{
 				Name: "default",
 				NetworkSource: kubevirtV1.NetworkSource{

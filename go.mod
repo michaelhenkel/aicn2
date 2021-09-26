@@ -9,6 +9,7 @@ require (
 	github.com/openshift/assisted-service v1.0.10-0.20210825070125-6ba8da87d788
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/spf13/cobra v1.2.1
+	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	k8s.io/api v0.21.1
 	k8s.io/apimachinery v0.21.1

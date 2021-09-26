@@ -1,18 +1,22 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/openshift/assisted-service/client/installer"
 	aiManifests "github.com/openshift/assisted-service/client/manifests"
 	"github.com/openshift/assisted-service/models"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 	"k8s.io/klog"
 
@@ -165,38 +169,27 @@ var create = &cobra.Command{
 			}
 			defer out.Close()
 			klog.Info("Downloading ISO")
-			if _, err := client.Installer.DownloadClusterISO(context.Background(), &installer.DownloadClusterISOParams{
-				ClusterID: *cluster.ID,
-			}, out); err != nil {
-				klog.Fatal(err)
-			}
-			/*
-				ignitionParams := &models.AssistedServiceIsoCreateParams{
-					OpenshiftVersion: *createCluster.OpenshiftVersion,
-					SSHPublicKey:     strings.Trim(createCluster.SSHPublicKey, "\n"),
-					PullSecret:       string(pullSecretByte),
-				}
-				klog.Info("Creating ISO")
-				if _, err := client.AssistedServiceIso.CreateISOAndUploadToS3(context.Background(), &assisted_service_iso.CreateISOAndUploadToS3Params{
-					AssistedServiceIsoCreateParams: ignitionParams,
-				}); err != nil {
-					klog.Fatal(err)
-				}
-				if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s", homedir, *createCluster.Name)); os.IsNotExist(err) {
-					if err := os.Mkdir(fmt.Sprintf("%s/.aicn2/%s", homedir, *createCluster.Name), 0755); err != nil {
+			attempt := 1
+			success := false
+			for !success {
+				if _, err := client.Installer.DownloadClusterISO(context.Background(), &installer.DownloadClusterISOParams{
+					ClusterID: *cluster.ID,
+				}, out); err != nil {
+					klog.Errorf("%d attempt of 5 failed with err %+v. Retrying\n", attempt, err)
+					if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err == nil {
+						if err := os.Remove(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err != nil {
+							klog.Error(err)
+						}
+					}
+					if attempt == 5 {
 						klog.Fatal(err)
 					}
+					attempt++
+
+				} else {
+					success = true
 				}
-				out, err := os.Create(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name))
-				if err != nil {
-					klog.Fatal(err)
-				}
-				defer out.Close()
-				klog.Info("Downloading ISO")
-				if _, err := client.AssistedServiceIso.DownloadISO(context.Background(), &assisted_service_iso.DownloadISOParams{}, out); err != nil {
-					klog.Fatal(err)
-				}
-			*/
+			}
 		}
 
 		var infraInterface infrastructure.InfrastructureInterface
@@ -262,17 +255,97 @@ var create = &cobra.Command{
 			klog.Fatal(err)
 		}
 		installConfig.Networking.NetworkType = "Contrail"
-		//installConfigByte, err := yaml.Marshal(installConfig)
 		if err != nil {
 			klog.Fatal(err)
 		}
 		updateClusterConfigParams := installer.NewUpdateClusterInstallConfigParams()
 		updateClusterConfigParams.SetClusterID(*cluster.ID)
-		//updateClusterConfigParams.SetInstallConfigParams(`"{\"networking\":{\"networkType\":\"Contrail\"}}"`)
 		updateClusterConfigParams.SetInstallConfigParams(`{"networking":{"networkType":"Contrail"}}`)
 		klog.Info("Setting Network Type")
 		if _, err := client.Installer.UpdateClusterInstallConfig(context.Background(), updateClusterConfigParams); err != nil {
 			klog.Fatal(err)
+		}
+		//kernelIngnitionParam := `{"ignition":{"version":"3.1.0"},"kernelArguments":{"shouldExist":["ipv6.disable","1"]}}`
+		klog.Info("Updating Host Roles")
+		for {
+			listHostsOK, err := client.Installer.ListHosts(context.Background(), &installer.ListHostsParams{
+				ClusterID: *cluster.ID,
+			})
+			if err != nil {
+				klog.Fatal(err)
+			}
+			client.Installer.V2UpdateHostInstallerArgs(context.Background(), &installer.V2UpdateHostInstallerArgsParams{
+				InstallerArgsParams: &models.InstallerArgsParams{},
+			})
+			hostList := listHostsOK.GetPayload()
+			if len(hostList) == worker+controller {
+				var hostRoles []*models.ClusterUpdateParamsHostsRolesItems0
+				for _, host := range hostList {
+					/*
+						if _, err := client.Installer.V2UpdateHostIgnition(context.Background(), &installer.V2UpdateHostIgnitionParams{
+							HostIgnitionParams: &models.HostIgnitionParams{
+								Config: kernelIngnitionParam,
+							},
+							HostID:     *host.ID,
+							InfraEnvID: *cluster.ID,
+						}); err != nil {
+							klog.Fatal(err)
+						}
+					*/
+					/*
+						if _, err := client.Installer.UpdateHostIgnition(context.Background(), &installer.UpdateHostIgnitionParams{
+							ClusterID: *cluster.ID,
+							HostIgnitionParams: &models.HostIgnitionParams{
+								Config: "",
+							},
+						}); err != nil {
+							klog.Fatal(err)
+						}
+					*/
+					hostnameList := strings.Split(host.RequestedHostname, "-")
+					if len(hostnameList) == 3 {
+						if hostnameList[1] == "worker" {
+							hostRoles = append(hostRoles, &models.ClusterUpdateParamsHostsRolesItems0{
+								ID:   *host.ID,
+								Role: models.HostRoleUpdateParamsWorker,
+							})
+						}
+						if hostnameList[1] == "controller" {
+							hostRoles = append(hostRoles, &models.ClusterUpdateParamsHostsRolesItems0{
+								ID:   *host.ID,
+								Role: models.HostRoleUpdateParamsMaster,
+							})
+						}
+					}
+				}
+				if len(hostRoles) == worker+controller {
+					if _, err := client.Installer.UpdateCluster(context.Background(), &installer.UpdateClusterParams{
+						ClusterID: *cluster.ID,
+						ClusterUpdateParams: &models.ClusterUpdateParams{
+							HostsRoles: hostRoles,
+						},
+					}); err != nil {
+						klog.Fatal(err)
+					}
+					break
+				}
+			}
+			time.Sleep(time.Second * 3)
+		}
+
+		klog.Info("Waiting for Cluster Ready")
+		for {
+			currentCluster, err := client.Installer.GetCluster(context.Background(), &installer.GetClusterParams{
+				ClusterID: *cluster.ID,
+			})
+			if err != nil {
+				klog.Fatal(err)
+			}
+			status := currentCluster.GetPayload().Status
+			if *status == "ready" {
+				break
+			}
+			time.Sleep(time.Second * 3)
 		}
 		fmt.Println("done")
 
@@ -293,6 +366,52 @@ var create = &cobra.Command{
 				}
 		*/
 	},
+}
+
+func remoteRun(user string, addr string, privateKey string, cmd string) (string, error) {
+	// privateKey could be read from a file, or retrieved from another storage
+	// source, such as the Secret Service / GNOME Keyring
+	key, err := ssh.ParsePrivateKey([]byte(privateKey))
+	if err != nil {
+		return "", err
+	}
+	// Authentication
+	config := &ssh.ClientConfig{
+		User: user,
+		// https://github.com/golang/go/issues/19767
+		// as clientConfig is non-permissive by default
+		// you can set ssh.InsercureIgnoreHostKey to allow any host
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(key),
+		},
+		//alternatively, you could use a password
+		/*
+		   Auth: []ssh.AuthMethod{
+		       ssh.Password("PASSWORD"),
+		   },
+		*/
+	}
+	// Connect
+	client, err := ssh.Dial("tcp", net.JoinHostPort(addr, "22"), config)
+	if err != nil {
+		return "", err
+	}
+	// Create a session. It is one session per command.
+	session, err := client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer session.Close()
+	var b bytes.Buffer  // import "bytes"
+	session.Stdout = &b // get output
+	// you can also pass what gets input to the stdin, allowing you to pipe
+	// content from client to server
+	//      session.Stdin = bytes.NewBufferString("My input")
+
+	// Finally, run the command
+	err = session.Run(cmd)
+	return b.String(), err
 }
 
 func findManifests(root, ext string) []string {

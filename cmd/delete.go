@@ -8,6 +8,7 @@ import (
 	api "github.com/michaelhenkel/aicn2/pkg/apis"
 	"github.com/michaelhenkel/aicn2/pkg/cn2"
 	"github.com/michaelhenkel/aicn2/pkg/infrastructure"
+	"github.com/michaelhenkel/aicn2/pkg/utils"
 	"github.com/openshift/assisted-service/client/installer"
 	"github.com/openshift/assisted-service/models"
 	"github.com/spf13/cobra"
@@ -55,7 +56,20 @@ var delete = &cobra.Command{
 				if _, err := client.Installer.DeregisterCluster(context.Background(), &installer.DeregisterClusterParams{
 					ClusterID: *cluster.ID,
 				}); err != nil {
-					klog.Fatal(err)
+					klog.Error(err)
+				}
+				if _, err := client.Installer.ResetCluster(context.Background(), &installer.ResetClusterParams{
+					ClusterID: *cl.ID,
+				}); err != nil {
+					klog.Error(err)
+				}
+				header := map[string]string{
+					"accept":        "application/json",
+					"Authorization": fmt.Sprintf("Bearer %s", token),
+				}
+				resp, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
+				if err != nil {
+					klog.Error(resp, err)
 				}
 			}
 		}
