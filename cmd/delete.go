@@ -100,7 +100,7 @@ var delete = &cobra.Command{
 		}
 		if err := infraInterface.DeleteStorage(infrastructure.Image{
 			Name: args[0],
-			Path: fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, cluster.Name),
+			Path: fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, args[0]),
 		}, controllerCounter, workerCounter); err != nil {
 			klog.Fatal(err)
 		}

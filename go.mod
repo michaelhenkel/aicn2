@@ -6,9 +6,12 @@ require (
 	github.com/go-openapi/runtime v0.19.31
 	github.com/go-openapi/strfmt v0.20.2 // indirect
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.1.0
+	github.com/machinebox/progress v0.2.0 // indirect
+	github.com/mitchellh/ioprogress v0.0.0-20180201004757-6a23b12fa88e // indirect
 	github.com/openshift/assisted-service v1.0.10-0.20210825070125-6ba8da87d788
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/spf13/cobra v1.2.1
+	github.com/txn2/txeh v1.3.0 // indirect
 	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	k8s.io/api v0.21.1

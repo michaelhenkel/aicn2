@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/machinebox/progress"
 	"github.com/openshift/assisted-service/client/installer"
 	aiManifests "github.com/openshift/assisted-service/client/manifests"
 	"github.com/openshift/assisted-service/models"
@@ -30,6 +31,7 @@ var (
 	noiso      bool
 	worker     int
 	controller int
+	nocontrail bool
 )
 
 func init() {
@@ -37,6 +39,7 @@ func init() {
 	create.PersistentFlags().IntVarP(&worker, "worker", "w", 0, "worker count")
 	create.PersistentFlags().IntVarP(&controller, "controller", "c", 1, "controller count")
 	create.PersistentFlags().BoolVar(&noiso, "noiso", false, "don't create iso")
+	create.PersistentFlags().BoolVar(&nocontrail, "nocontrail", false, "don't install contrail")
 }
 
 type InstallConfig struct {
@@ -148,6 +151,15 @@ var create = &cobra.Command{
 					cluster = cl
 				}
 			}
+			klog.Info("Setting Discovery Kernel Arg")
+			if _, err := client.Installer.UpdateDiscoveryIgnition(context.Background(), &installer.UpdateDiscoveryIgnitionParams{
+				ClusterID: *cluster.ID,
+				DiscoveryIgnitionParams: &models.DiscoveryIgnitionParams{
+					Config: `{"ignition":{"version":"3.1.0"},"kernelArguments":{"shouldExist":["ipv6.disable=1"]}}`,
+				},
+			}); err != nil {
+				klog.Fatalf("%+v\n", err)
+			}
 			klog.Info("Generating ISO")
 			if _, err := client.Installer.GenerateClusterISO(context.Background(), &installer.GenerateClusterISOParams{
 				ClusterID: *cluster.ID,
@@ -163,19 +175,39 @@ var create = &cobra.Command{
 					klog.Fatal(err)
 				}
 			}
-			out, err := os.Create(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name))
-			if err != nil {
-				klog.Fatal(err)
-			}
-			defer out.Close()
+
 			klog.Info("Downloading ISO")
+
 			attempt := 1
 			success := false
 			for !success {
+				isoHeaderResp, err := client.Installer.DownloadClusterISOHeaders(context.Background(), &installer.DownloadClusterISOHeadersParams{
+					ClusterID: *cluster.ID,
+				})
+				if err != nil {
+					klog.Fatal(err)
+				}
+				out, err := os.Create(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name))
+				if err != nil {
+					klog.Fatal(err)
+				}
+				defer out.Close()
+				progressWriter := progress.NewWriter(out)
+				ctx := context.Background()
+				go func() {
+
+					progressChan := progress.NewTicker(ctx, progressWriter, isoHeaderResp.ContentLength, 1*time.Second)
+					for p := range progressChan {
+						//fmt.Printf("\r%v remaining...", p.Remaining().Round(time.Second))
+						fmt.Printf("\r%v remaining. %d of %d written...", p.Remaining().Round(time.Second), p.N(), isoHeaderResp.ContentLength)
+					}
+					fmt.Println("\rdownload is completed")
+				}()
 				if _, err := client.Installer.DownloadClusterISO(context.Background(), &installer.DownloadClusterISOParams{
 					ClusterID: *cluster.ID,
-				}, out); err != nil {
+				}, progressWriter); err != nil {
 					klog.Errorf("%d attempt of 5 failed with err %+v. Retrying\n", attempt, err)
+					ctx.Done()
 					if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err == nil {
 						if err := os.Remove(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err != nil {
 							klog.Error(err)
@@ -189,6 +221,7 @@ var create = &cobra.Command{
 				} else {
 					success = true
 				}
+
 			}
 		}
 
@@ -217,28 +250,30 @@ var create = &cobra.Command{
 		if err := infraInterface.CreateDNSLB(cluster.Name); err != nil {
 			klog.Fatal(err)
 		}
-		klog.Info("Uploading Manifests")
-		manifestFiles := findManifests("manifests", ".yaml")
-		for _, manifestFile := range manifestFiles {
-			manifestByte, err := os.ReadFile(manifestFile)
-			if err != nil {
-				klog.Fatal(err)
-			}
-			encodedString := base64.StdEncoding.EncodeToString([]byte(manifestByte))
-			fileName := filepath.Base(manifestFile)
-			folder := "manifests"
-			manifest := &models.CreateManifestParams{
-				Content:  &encodedString,
-				FileName: &fileName,
-				Folder:   &folder,
-			}
-			clusterManifest := &aiManifests.CreateClusterManifestParams{
-				CreateManifestParams: manifest,
-				ClusterID:            *cluster.ID,
-			}
+		if !nocontrail {
+			klog.Info("Uploading Manifests")
+			manifestFiles := findManifests("manifests", ".yaml")
+			for _, manifestFile := range manifestFiles {
+				manifestByte, err := os.ReadFile(manifestFile)
+				if err != nil {
+					klog.Fatal(err)
+				}
+				encodedString := base64.StdEncoding.EncodeToString([]byte(manifestByte))
+				fileName := filepath.Base(manifestFile)
+				folder := "manifests"
+				manifest := &models.CreateManifestParams{
+					Content:  &encodedString,
+					FileName: &fileName,
+					Folder:   &folder,
+				}
+				clusterManifest := &aiManifests.CreateClusterManifestParams{
+					CreateManifestParams: manifest,
+					ClusterID:            *cluster.ID,
+				}
 
-			if _, err := client.Manifests.CreateClusterManifest(context.Background(), clusterManifest); err != nil {
-				klog.Fatal(err)
+				if _, err := client.Manifests.CreateClusterManifest(context.Background(), clusterManifest); err != nil {
+					klog.Fatal(err)
+				}
 			}
 		}
 
@@ -250,23 +285,24 @@ var create = &cobra.Command{
 		}
 
 		installConfigPayload := installConfigOK.GetPayload()
-		installConfig := &InstallConfig{}
-		if err := yaml.Unmarshal([]byte(installConfigPayload), installConfig); err != nil {
-			klog.Fatal(err)
+		if !nocontrail {
+			installConfig := &InstallConfig{}
+			if err := yaml.Unmarshal([]byte(installConfigPayload), installConfig); err != nil {
+				klog.Fatal(err)
+			}
+			installConfig.Networking.NetworkType = "Contrail"
+			if err != nil {
+				klog.Fatal(err)
+			}
+			updateClusterConfigParams := installer.NewUpdateClusterInstallConfigParams()
+			updateClusterConfigParams.SetClusterID(*cluster.ID)
+			updateClusterConfigParams.SetInstallConfigParams(`{"networking":{"networkType":"Contrail"}}`)
+			klog.Info("Setting Network Type")
+			if _, err := client.Installer.UpdateClusterInstallConfig(context.Background(), updateClusterConfigParams); err != nil {
+				klog.Fatal(err)
+			}
 		}
-		installConfig.Networking.NetworkType = "Contrail"
-		if err != nil {
-			klog.Fatal(err)
-		}
-		updateClusterConfigParams := installer.NewUpdateClusterInstallConfigParams()
-		updateClusterConfigParams.SetClusterID(*cluster.ID)
-		updateClusterConfigParams.SetInstallConfigParams(`{"networking":{"networkType":"Contrail"}}`)
-		klog.Info("Setting Network Type")
-		if _, err := client.Installer.UpdateClusterInstallConfig(context.Background(), updateClusterConfigParams); err != nil {
-			klog.Fatal(err)
-		}
-		//kernelIngnitionParam := `{"ignition":{"version":"3.1.0"},"kernelArguments":{"shouldExist":["ipv6.disable","1"]}}`
-		klog.Info("Updating Host Roles")
+		klog.Info("Waiting for Host Discovery")
 		for {
 			listHostsOK, err := client.Installer.ListHosts(context.Background(), &installer.ListHostsParams{
 				ClusterID: *cluster.ID,
@@ -292,11 +328,22 @@ var create = &cobra.Command{
 							klog.Fatal(err)
 						}
 					*/
+					if _, err := client.Installer.UpdateHostInstallerArgs(context.Background(), &installer.UpdateHostInstallerArgsParams{
+						ClusterID: *cluster.ID,
+						HostID:    *host.ID,
+						InstallerArgsParams: &models.InstallerArgsParams{
+							Args: []string{"--append-karg", "ipv6.disable=1"},
+						},
+					}); err != nil {
+						klog.Fatal(err)
+					}
 					/*
+						kernelIngnitionParam := `{"ignition":{"version":"3.1.0"},"kernelArguments":{"shouldExist":["ipv6.disable","1"]}}`
 						if _, err := client.Installer.UpdateHostIgnition(context.Background(), &installer.UpdateHostIgnitionParams{
 							ClusterID: *cluster.ID,
+							HostID:    *host.ID,
 							HostIgnitionParams: &models.HostIgnitionParams{
-								Config: "",
+								Config: kernelIngnitionParam,
 							},
 						}); err != nil {
 							klog.Fatal(err)
@@ -319,6 +366,7 @@ var create = &cobra.Command{
 					}
 				}
 				if len(hostRoles) == worker+controller {
+					klog.Info("Updating Host Roles")
 					if _, err := client.Installer.UpdateCluster(context.Background(), &installer.UpdateClusterParams{
 						ClusterID: *cluster.ID,
 						ClusterUpdateParams: &models.ClusterUpdateParams{
@@ -347,7 +395,6 @@ var create = &cobra.Command{
 			}
 			time.Sleep(time.Second * 3)
 		}
-		fmt.Println("done")
 
 		/*
 			klog.Info("Setting MaschineNetwork")

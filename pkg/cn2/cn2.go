@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/michaelhenkel/aicn2/pkg/infrastructure"
 	"github.com/michaelhenkel/aicn2/pkg/k8s"
+	"github.com/txn2/txeh"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -88,20 +90,6 @@ func (c *CN2) CreateDNSLB(name string) error {
 				TargetPort: intstr.IntOrString{
 					IntVal: 22623,
 				},
-			}, {
-				Name:     "ingress-443",
-				Port:     443,
-				Protocol: "TCP",
-				TargetPort: intstr.IntOrString{
-					IntVal: 443,
-				},
-			}, {
-				Name:     "ingress-80",
-				Port:     80,
-				Protocol: "TCP",
-				TargetPort: intstr.IntOrString{
-					IntVal: 80,
-				},
 			}},
 			Selector: map[string]string{"occluster": name, "role": "controller"},
 		},
@@ -111,6 +99,36 @@ func (c *CN2) CreateDNSLB(name string) error {
 			return err
 		}
 	}
+	for {
+		apiSvc, err := c.Client.K8S.CoreV1().Services(name).Get(context.Background(), "api", metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if apiSvc.Spec.ClusterIP != "" {
+			hosts, err := txeh.NewHostsDefault()
+			if err != nil {
+				return err
+			}
+			hosts.AddHost(apiSvc.Spec.ClusterIP, "api.oc.svc.cluster1.local")
+			hosts.AddHost(apiSvc.Spec.ClusterIP, "api-int.oc.svc.cluster1.local")
+			hosts.RenderHostsFile()
+			f, err := os.CreateTemp("", "")
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			if err := hosts.SaveAs(f.Name()); err != nil {
+				return err
+			}
+			stderr, err := RunSudo(fmt.Sprintf("cp %s /etc/hosts", f.Name()), "")
+			if err != nil {
+				return fmt.Errorf(stderr.String())
+			}
+			break
+		}
+		time.Sleep(time.Second * 2)
+	}
+
 	intApiSvc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "api-int",
@@ -131,8 +149,24 @@ func (c *CN2) CreateDNSLB(name string) error {
 				TargetPort: intstr.IntOrString{
 					IntVal: 22623,
 				},
-			}, {
-				Name:     "ingress-443",
+			}},
+			Selector: map[string]string{"occluster": name, "role": "controller"},
+		},
+	}
+	if _, err := c.Client.K8S.CoreV1().Services(name).Create(context.Background(), intApiSvc, metav1.CreateOptions{}); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return err
+		}
+	}
+
+	appSvc := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ingress",
+			Namespace: name,
+		},
+		Spec: v1.ServiceSpec{
+			Ports: []v1.ServicePort{{
+				Name:     "ingress-433",
 				Port:     443,
 				Protocol: "TCP",
 				TargetPort: intstr.IntOrString{
@@ -146,14 +180,15 @@ func (c *CN2) CreateDNSLB(name string) error {
 					IntVal: 80,
 				},
 			}},
-			Selector: map[string]string{"occluster": name, "role": "controller"},
+			Selector: map[string]string{"occluster": name, "role": "worker"},
 		},
 	}
-	if _, err := c.Client.K8S.CoreV1().Services(name).Create(context.Background(), intApiSvc, metav1.CreateOptions{}); err != nil {
+	if _, err := c.Client.K8S.CoreV1().Services(name).Create(context.Background(), appSvc, metav1.CreateOptions{}); err != nil {
 		if !errors.IsAlreadyExists(err) {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -168,6 +203,11 @@ func (c *CN2) DeleteDNSLB(name string) error {
 			return err
 		}
 	}
+	if err := c.Client.K8S.CoreV1().Services(name).Delete(context.Background(), "ingress", metav1.DeleteOptions{}); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -175,20 +215,13 @@ func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstanc
 	var firstBootOrder uint = 1
 	var secondBootOrder uint = 2
 
-	return &kubevirtV1.VirtualMachineInstance{
+	vmi := &kubevirtV1.VirtualMachineInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: clustername,
 			Labels:    map[string]string{"occluster": clustername, "role": role},
 		},
 		Spec: kubevirtV1.VirtualMachineInstanceSpec{
-			ReadinessProbe: &kubevirtV1.Probe{
-				Handler: kubevirtV1.Handler{
-					TCPSocket: &v1.TCPSocketAction{
-						Port: intstr.FromInt(6443),
-					},
-				},
-			},
 			Networks: []kubevirtV1.Network{{
 				Name: "default",
 				NetworkSource: kubevirtV1.NetworkSource{
@@ -205,10 +238,16 @@ func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstanc
 				*/
 			}},
 			Domain: kubevirtV1.DomainSpec{
+				CPU: &kubevirtV1.CPU{
+					Sockets:               12,
+					Threads:               1,
+					Cores:                 1,
+					DedicatedCPUPlacement: true,
+				},
 				Resources: kubevirtV1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						"memory": resource.MustParse("32Gi"),
-						"cpu":    resource.MustParse("8"),
+						//"cpu":    resource.MustParse("8"),
 					},
 				},
 				Devices: kubevirtV1.Devices{
@@ -263,6 +302,25 @@ func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstanc
 			}},
 		},
 	}
+	if role == "controller" {
+		vmi.Spec.ReadinessProbe = &kubevirtV1.Probe{
+			Handler: kubevirtV1.Handler{
+				TCPSocket: &v1.TCPSocketAction{
+					Port: intstr.FromInt(6443),
+				},
+			},
+		}
+	}
+	if role == "worker" {
+		vmi.Spec.ReadinessProbe = &kubevirtV1.Probe{
+			Handler: kubevirtV1.Handler{
+				TCPSocket: &v1.TCPSocketAction{
+					Port: intstr.FromInt(443),
+				},
+			},
+		}
+	}
+	return vmi
 }
 
 func (c *CN2) CreateVMS(name string, controller int, worker int) error {
@@ -513,7 +571,7 @@ func createGlusterFSVolumes(name string) error {
 
 	isoVolumeExists := true
 	isoVolumeInfoCommandString := fmt.Sprintf("gluster volume info %s-iso", name)
-	stderr, err := runSudo(isoVolumeInfoCommandString, "")
+	stderr, err := RunSudo(isoVolumeInfoCommandString, "")
 	if err != nil {
 		if strings.Trim(stderr.String(), "\n") == fmt.Sprintf("Volume %s-iso does not exist", name) {
 			isoVolumeExists = false
@@ -525,14 +583,14 @@ func createGlusterFSVolumes(name string) error {
 
 	if !isoVolumeExists {
 		isoVolumeCreateCommandString := fmt.Sprintf("gluster volume create %s-iso 5b3s30.cluster1.local:/glusterfs/%s-iso", name, name)
-		stderr, err := runSudo(isoVolumeCreateCommandString, "")
+		stderr, err := RunSudo(isoVolumeCreateCommandString, "")
 		if err != nil {
 			klog.Error(stderr.String(), isoVolumeCreateCommandString)
 			return err
 		}
 
 		isoVolumeStartCommandString := fmt.Sprintf("gluster volume start %s-iso", name)
-		stderr, err = runSudo(isoVolumeStartCommandString, "")
+		stderr, err = RunSudo(isoVolumeStartCommandString, "")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
@@ -543,13 +601,13 @@ func createGlusterFSVolumes(name string) error {
 			return err
 		}
 		isoVolumeMountCommandString := fmt.Sprintf("mount -t glusterfs 5b3s30.cluster1.local:/%s-iso /var/glusterfsmnt/%s-iso", name, name)
-		stderr, err = runSudo(isoVolumeMountCommandString, "")
+		stderr, err = RunSudo(isoVolumeMountCommandString, "")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
 		}
 		isoVolumeChmodCommandString := fmt.Sprintf("chmod 777 /var/glusterfsmnt/%s-iso", name)
-		stderr, err = runSudo(isoVolumeChmodCommandString, "")
+		stderr, err = RunSudo(isoVolumeChmodCommandString, "")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
@@ -558,7 +616,7 @@ func createGlusterFSVolumes(name string) error {
 
 	diskVolumeExists := true
 	diskVolumeInfoCommandString := fmt.Sprintf("gluster volume info %s-disk", name)
-	stderr, err = runSudo(diskVolumeInfoCommandString, "")
+	stderr, err = RunSudo(diskVolumeInfoCommandString, "")
 	if err != nil {
 		if strings.Trim(stderr.String(), "\n") == fmt.Sprintf("Volume %s-disk does not exist", name) {
 			diskVolumeExists = false
@@ -570,14 +628,14 @@ func createGlusterFSVolumes(name string) error {
 
 	if !diskVolumeExists {
 		diskVolumeCreateCommandString := fmt.Sprintf("gluster volume create %s-disk 5b3s30.cluster1.local:/glusterfs/%s-disk", name, name)
-		stderr, err := runSudo(diskVolumeCreateCommandString, "")
+		stderr, err := RunSudo(diskVolumeCreateCommandString, "")
 		if err != nil {
 			klog.Error(stderr.String(), diskVolumeCreateCommandString)
 			return err
 		}
 
 		diskVolumeStartCommandString := fmt.Sprintf("gluster volume start %s-disk", name)
-		stderr, err = runSudo(diskVolumeStartCommandString, "")
+		stderr, err = RunSudo(diskVolumeStartCommandString, "")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
@@ -588,7 +646,7 @@ func createGlusterFSVolumes(name string) error {
 
 func deleteGlusterFSVolumes(name, path string) error {
 	if _, err := os.Stat(fmt.Sprintf("/var/glusterfsmnt/%s-iso", name)); err == nil {
-		stderr, err := runSudo(fmt.Sprintf("umount /var/glusterfsmnt/%s-iso", name), "")
+		stderr, err := RunSudo(fmt.Sprintf("umount /var/glusterfsmnt/%s-iso", name), "")
 		if err != nil {
 			if strings.Trim(stderr.String(), "\n") != fmt.Sprintf("umount: /var/glusterfsmnt/%s-iso: not mounted.", name) {
 				klog.Error(stderr.String())
@@ -596,43 +654,43 @@ func deleteGlusterFSVolumes(name, path string) error {
 			}
 		}
 
-		stderr, err = runSudo(fmt.Sprintf("rm -rf /var/glusterfsmnt/%s-iso", name), "")
+		stderr, err = RunSudo(fmt.Sprintf("rm -rf /var/glusterfsmnt/%s-iso", name), "")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
 		}
 
-		stderr, err = runSudo(fmt.Sprintf("gluster volume stop %s-iso", name), "y")
+		stderr, err = RunSudo(fmt.Sprintf("gluster volume stop %s-iso", name), "y")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
 		}
 
-		stderr, err = runSudo(fmt.Sprintf("gluster volume delete %s-iso", name), "y")
+		stderr, err = RunSudo(fmt.Sprintf("gluster volume delete %s-iso", name), "y")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
 		}
 
-		stderr, err = runSudo(fmt.Sprintf("rm -rf /glusterfs/%s-iso", name), "")
+		stderr, err = RunSudo(fmt.Sprintf("rm -rf /glusterfs/%s-iso", name), "")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
 		}
 
-		stderr, err = runSudo(fmt.Sprintf("gluster volume stop %s-disk", name), "y")
+		stderr, err = RunSudo(fmt.Sprintf("gluster volume stop %s-disk", name), "y")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
 		}
 
-		stderr, err = runSudo(fmt.Sprintf("gluster volume delete %s-disk", name), "y")
+		stderr, err = RunSudo(fmt.Sprintf("gluster volume delete %s-disk", name), "y")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
 		}
 
-		stderr, err = runSudo(fmt.Sprintf("rm -rf /glusterfs/%s-disk", name), "")
+		stderr, err = RunSudo(fmt.Sprintf("rm -rf /glusterfs/%s-disk", name), "")
 		if err != nil {
 			klog.Error(stderr.String())
 			return err
@@ -650,7 +708,7 @@ func deleteGlusterFSVolumes(name, path string) error {
 	return nil
 }
 
-func runSudo(command, input string) (bytes.Buffer, error) {
+func RunSudo(command, input string) (bytes.Buffer, error) {
 	var outb, errb bytes.Buffer
 	commandList := strings.Split(command, " ")
 	cmd := exec.Command("sudo", commandList...)
