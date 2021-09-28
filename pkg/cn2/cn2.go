@@ -314,8 +314,12 @@ func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstanc
 	if role == "worker" {
 		vmi.Spec.ReadinessProbe = &kubevirtV1.Probe{
 			Handler: kubevirtV1.Handler{
-				TCPSocket: &v1.TCPSocketAction{
-					Port: intstr.FromInt(443),
+				HTTPGet: &v1.HTTPGetAction{
+					Path: "/healthz/ready",
+					Port: intstr.IntOrString{
+						IntVal: 1936,
+					},
+					Scheme: v1.URISchemeHTTP,
 				},
 			},
 		}
