@@ -2,9 +2,10 @@ package infrastructure
 
 type InfrastructureInterface interface {
 	CreateStorage(image Image, controller int, worker int) error
+	GetClusterDomain(name string) (string, error)
 	CreateVN(name string, subnet string) error
-	CreateVMS(name string, controller int, worker int) error
-	CreateDNSLB(name string) error
+	CreateVMS(name string, domainName string, controller int, worker int) error
+	CreateDNSLB(name string, domain string) error
 	DeleteStorage(image Image, controller int, worker int) error
 	DeleteVMS(name string, controller int, worker int) error
 	DeleteDNSLB(name string) error

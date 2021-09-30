@@ -3,7 +3,7 @@ kind: MachineConfig
 metadata:
   labels:
     machineconfiguration.openshift.io/role: bootstrap
-  name: 99-openshift-machineconfig-master-kargs
+  name: 99-openshift-machineconfig-bootstrap-kargs
 spec:
   kernelArguments:
    -  ipv6.disable=1

@@ -13,6 +13,7 @@ import (
 	"github.com/michaelhenkel/aicn2/pkg/infrastructure"
 	"github.com/michaelhenkel/aicn2/pkg/k8s"
 	"github.com/txn2/txeh"
+	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -36,6 +37,28 @@ func New() (*CN2, error) {
 	return &CN2{
 		Client: client,
 	}, nil
+}
+
+func (c *CN2) GetClusterDomain(name string) (string, error) {
+	cm, err := c.Client.K8S.CoreV1().ConfigMaps("kube-system").Get(context.Background(), "kubeadm-config", metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	clusterConfig, ok := cm.Data["ClusterConfiguration"]
+	if !ok {
+		return "", fmt.Errorf("cluster config not found")
+	}
+
+	var cc struct {
+		ClusterName string `yaml:"clusterName"`
+	}
+	if err := yaml.Unmarshal([]byte(clusterConfig), &cc); err != nil {
+		return "", err
+	}
+	if cc.ClusterName == "" {
+		return "", fmt.Errorf("cluster name empty")
+	}
+	return fmt.Sprintf("svc.%s", cc.ClusterName), nil
 }
 
 func (c *CN2) CreateVN(name, subnet string) error {
@@ -69,7 +92,7 @@ func (c *CN2) DeleteVN(name string) error {
 	return nil
 }
 
-func (c *CN2) CreateDNSLB(name string) error {
+func (c *CN2) CreateDNSLB(name, domain string) error {
 	apiSvc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "api",
@@ -109,8 +132,8 @@ func (c *CN2) CreateDNSLB(name string) error {
 			if err != nil {
 				return err
 			}
-			hosts.AddHost(apiSvc.Spec.ClusterIP, "api.oc.svc.cluster1.local")
-			hosts.AddHost(apiSvc.Spec.ClusterIP, "api-int.oc.svc.cluster1.local")
+			hosts.AddHost(apiSvc.Spec.ClusterIP, fmt.Sprintf("api.%s.%s", name, domain))
+			hosts.AddHost(apiSvc.Spec.ClusterIP, fmt.Sprintf("api-int.%s.%s", name, domain))
 			hosts.RenderHostsFile()
 			f, err := os.CreateTemp("", "")
 			if err != nil {
@@ -211,7 +234,7 @@ func (c *CN2) DeleteDNSLB(name string) error {
 	return nil
 }
 
-func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstance {
+func defineVMI(name, clustername, role, nameserver, domainName string) *kubevirtV1.VirtualMachineInstance {
 	var firstBootOrder uint = 1
 	var secondBootOrder uint = 2
 
@@ -222,6 +245,11 @@ func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstanc
 			Labels:    map[string]string{"occluster": clustername, "role": role},
 		},
 		Spec: kubevirtV1.VirtualMachineInstanceSpec{
+			DNSPolicy: v1.DNSNone,
+			DNSConfig: &v1.PodDNSConfig{
+				Nameservers: []string{nameserver},
+				Searches:    []string{fmt.Sprintf("%s.%s", clustername, domainName)},
+			},
 			Networks: []kubevirtV1.Network{{
 				Name: "default",
 				NetworkSource: kubevirtV1.NetworkSource{
@@ -286,11 +314,20 @@ func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstanc
 			Volumes: []kubevirtV1.Volume{{
 				Name: fmt.Sprintf("%s-disk", name),
 				VolumeSource: kubevirtV1.VolumeSource{
-					PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
-						ClaimName: fmt.Sprintf("%s-disk", name),
-						ReadOnly:  false,
+					HostDisk: &kubevirtV1.HostDisk{
+						Capacity: resource.MustParse("120Gi"),
+						Path:     fmt.Sprintf("/glusterfs/images/%s.img", name),
+						Type:     kubevirtV1.HostDiskExistsOrCreate,
 					},
 				},
+				/*
+					VolumeSource: kubevirtV1.VolumeSource{
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							ClaimName: fmt.Sprintf("%s-disk", name),
+							ReadOnly:  false,
+						},
+					},
+				*/
 			}, {
 				Name: fmt.Sprintf("%s-iso", name),
 				VolumeSource: kubevirtV1.VolumeSource{
@@ -327,10 +364,14 @@ func defineVMI(name, clustername, role string) *kubevirtV1.VirtualMachineInstanc
 	return vmi
 }
 
-func (c *CN2) CreateVMS(name string, controller int, worker int) error {
+func (c *CN2) CreateVMS(name, domainName string, controller int, worker int) error {
+	dnsSvc, err := c.Client.K8S.CoreV1().Services("kube-system").Get(context.Background(), "coredns", metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", name, i)
-		vmi := defineVMI(nodename, name, "controller")
+		vmi := defineVMI(nodename, name, "controller", dnsSvc.Spec.ClusterIP, domainName)
 		if _, err := c.Client.Kubevirt.VirtualMachineInstance(name).Create(vmi); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err
@@ -339,7 +380,7 @@ func (c *CN2) CreateVMS(name string, controller int, worker int) error {
 	}
 	for i := 0; i < worker; i++ {
 		nodename := fmt.Sprintf("%s-worker-%d", name, i)
-		vmi := defineVMI(nodename, name, "worker")
+		vmi := defineVMI(nodename, name, "worker", dnsSvc.Spec.ClusterIP, domainName)
 		if _, err := c.Client.Kubevirt.VirtualMachineInstance(name).Create(vmi); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err

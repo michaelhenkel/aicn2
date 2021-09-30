@@ -80,6 +80,16 @@ var create = &cobra.Command{
 		if file == "" && len(args) != 1 {
 			klog.Fatal("--file or name has to be specified")
 		}
+		var infraInterface infrastructure.InfrastructureInterface
+		c, err := cn2.New()
+		if err != nil {
+			klog.Fatal(err)
+		}
+		infraInterface = c
+		clusterDomain, err := c.GetClusterDomain(args[0])
+		if err != nil {
+			klog.Fatal(err)
+		}
 		client, err := api.NewClient(token)
 		if err != nil {
 			klog.Fatal(err)
@@ -114,7 +124,7 @@ var create = &cobra.Command{
 			if controller+worker > 1 {
 				ha = true
 			}
-			createCluster, err := api.NewCreateCluster(fileByte, ha)
+			createCluster, err := api.NewCreateCluster(fileByte, clusterDomain, ha)
 			if err != nil {
 				klog.Fatal(err)
 			}
@@ -151,11 +161,57 @@ var create = &cobra.Command{
 					cluster = cl
 				}
 			}
-			klog.Info("Setting Discovery Kernel Arg")
+			serviceScript := `#!/bin/bash
+success=0
+until [ $success -gt 1 ]; do
+  tmp=$(mktemp)
+  cat <<EOF>${tmp} || true
+data:
+  requestheader-client-ca-file: |
+$(while IFS= read -a line; do echo "    $line"; done < <(cat /etc/kubernetes/bootstrap-secrets/aggregator-ca.crt))
+EOF
+  KUBECONFIG=/etc/kubernetes/bootstrap-secrets/kubeconfig kubectl -n kube-system patch configmap extension-apiserver-authentication --patch-file ${tmp}
+  if [[ $? -eq 0 ]]; then
+	rm ${tmp}
+	success=2
+  fi
+  rm ${tmp}
+  sleep 2
+done`
+			encodedScript := base64.StdEncoding.EncodeToString([]byte(serviceScript))
+			ingitionConfig := fmt.Sprintf(`{
+	"ignition": { "version": "3.1.0" },
+	"systemd": {
+		"units": [{
+			"name": "ca-patch.service",
+			"enabled": true,
+			"contents": "[Service]\nType=oneshot\nExecStart=/usr/local/bin/ca-patch.sh\n\n[Install]\nWantedBy=multi-user.target"
+	  	}]
+	},
+	"storage": {
+		"files": [{
+			"path": "/usr/local/bin/ca-patch.sh",
+			"mode": 720,
+			"contents": { "source": "data:text/plain;charset=utf-8;base64,%s" }
+		}]
+	},
+	"kernelArguments": {
+		"shouldExist":["ipv6.disable=1"]
+	}
+}`, encodedScript)
+			/*
+			   			ingitionConfig = `{
+			   	"ignition": { "version": "3.1.0" },
+			   	"kernelArguments": {
+			   		"shouldExist":["ipv6.disable=1"]
+			   	}
+			   }`
+			*/
+			klog.Info("Setting Discovery Kernel Arg and CA Patch Service")
 			if _, err := client.Installer.UpdateDiscoveryIgnition(context.Background(), &installer.UpdateDiscoveryIgnitionParams{
 				ClusterID: *cluster.ID,
 				DiscoveryIgnitionParams: &models.DiscoveryIgnitionParams{
-					Config: `{"ignition":{"version":"3.1.0"},"kernelArguments":{"shouldExist":["ipv6.disable=1"]}}`,
+					Config: ingitionConfig,
 				},
 			}); err != nil {
 				klog.Fatalf("%+v\n", err)
@@ -198,16 +254,22 @@ var create = &cobra.Command{
 
 					progressChan := progress.NewTicker(ctx, progressWriter, isoHeaderResp.ContentLength, 1*time.Second)
 					for p := range progressChan {
-						//fmt.Printf("\r%v remaining...", p.Remaining().Round(time.Second))
-						fmt.Printf("\r%v remaining. %d of %d written...", p.Remaining().Round(time.Second), p.N(), isoHeaderResp.ContentLength)
+						/*
+							remainingSeconds := int64(p.Remaining().Seconds())
+							remainingKiloBytes := isoHeaderResp.ContentLength / 1024
+							KBPerSec := remainingKiloBytes / remainingSeconds
+							fmt.Printf("\r%v remaining. %d of %d written... %d kbyte/sec", p.Remaining().Round(time.Second), p.N(), isoHeaderResp.ContentLength, KBPerSec)
+						*/
+						fmt.Printf("\r%v remaining. %d of %d written... %d kbyte/sec", p.Remaining().Round(time.Second), p.N(), isoHeaderResp.ContentLength)
 					}
 					fmt.Println("\rdownload is completed")
 				}()
 				if _, err := client.Installer.DownloadClusterISO(context.Background(), &installer.DownloadClusterISOParams{
 					ClusterID: *cluster.ID,
 				}, progressWriter); err != nil {
-					klog.Errorf("%d attempt of 5 failed with err %+v. Retrying\n", attempt, err)
 					ctx.Done()
+					klog.Errorf("%d attempt of 5 failed with err %+v. Retrying\n", attempt, err)
+
 					if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err == nil {
 						if err := os.Remove(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err != nil {
 							klog.Error(err)
@@ -219,18 +281,13 @@ var create = &cobra.Command{
 					attempt++
 
 				} else {
+					ctx.Done()
 					success = true
 				}
 
 			}
 		}
 
-		var infraInterface infrastructure.InfrastructureInterface
-		c, err := cn2.New()
-		if err != nil {
-			klog.Fatal(err)
-		}
-		infraInterface = c
 		klog.Info("Preparing Storage")
 		if err := infraInterface.CreateStorage(infrastructure.Image{
 			Name: cluster.Name,
@@ -242,12 +299,13 @@ var create = &cobra.Command{
 		if err := infraInterface.CreateVN(cluster.Name, cluster.MachineNetworkCidr); err != nil {
 			klog.Fatal(err)
 		}
+
 		klog.Info("Creating VMs")
-		if err := infraInterface.CreateVMS(cluster.Name, controller, worker); err != nil {
+		if err := infraInterface.CreateVMS(cluster.Name, clusterDomain, controller, worker); err != nil {
 			klog.Fatal(err)
 		}
 		klog.Info("Creating DNS and LB")
-		if err := infraInterface.CreateDNSLB(cluster.Name); err != nil {
+		if err := infraInterface.CreateDNSLB(cluster.Name, clusterDomain); err != nil {
 			klog.Fatal(err)
 		}
 		if !nocontrail {

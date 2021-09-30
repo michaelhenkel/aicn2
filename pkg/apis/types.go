@@ -58,7 +58,7 @@ func NewClient(token string) (*client.AssistedInstall, error) {
 	return aiClient, nil
 }
 
-func NewCreateCluster(clusterConfig []byte, ha bool) (*models.ClusterCreateParams, error) {
+func NewCreateCluster(clusterConfig []byte, clusterDomain string, ha bool) (*models.ClusterCreateParams, error) {
 	cluster := &models.ClusterCreateParams{}
 	if err := json.Unmarshal(clusterConfig, cluster); err != nil {
 		return nil, err
@@ -74,9 +74,7 @@ func NewCreateCluster(clusterConfig []byte, ha bool) (*models.ClusterCreateParam
 	if cluster.OcpReleaseImage == "" {
 		cluster.OcpReleaseImage = "quay.io/openshift-release-dev/ocp-release:4.8.4-x86_64"
 	}
-	if cluster.BaseDNSDomain == "" {
-		cluster.BaseDNSDomain = "cluster.local"
-	}
+	cluster.BaseDNSDomain = clusterDomain
 	if cluster.Hyperthreading == nil {
 		hyperthreading := "all"
 		cluster.Hyperthreading = &hyperthreading
