@@ -249,42 +249,58 @@ done`
 				}
 				defer out.Close()
 				progressWriter := progress.NewWriter(out)
-				ctx := context.Background()
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
 				go func() {
-
 					progressChan := progress.NewTicker(ctx, progressWriter, isoHeaderResp.ContentLength, 1*time.Second)
+					var previousTime time.Time
+					var previousByte int64
 					for p := range progressChan {
-						/*
-							remainingSeconds := int64(p.Remaining().Seconds())
-							remainingKiloBytes := isoHeaderResp.ContentLength / 1024
-							KBPerSec := remainingKiloBytes / remainingSeconds
-							fmt.Printf("\r%v remaining. %d of %d written... %d kbyte/sec", p.Remaining().Round(time.Second), p.N(), isoHeaderResp.ContentLength, KBPerSec)
-						*/
-						fmt.Printf("\r%v remaining. %d of %d written... %d kbyte/sec", p.Remaining().Round(time.Second), p.N(), isoHeaderResp.ContentLength)
+						select {
+						case <-ctx.Done():
+							return
+						default:
+							var bytePerSec int64
+							if previousByte != 0 {
+								transferedBytes := p.N() - previousByte
+								duration := time.Since(previousTime).Milliseconds()
+								if duration > 0 && transferedBytes > 0 {
+									durationSec := duration / 1000
+									transferedKbytes := transferedBytes / 1024
+									if durationSec > 0 && transferedKbytes > 0 {
+										bytePerSec = transferedKbytes / durationSec
+									}
+
+								}
+							}
+							fmt.Printf("\r%v remaining. %d of %d written... %d kbyte/sec", p.Remaining().Round(time.Second), p.N()/1024, isoHeaderResp.ContentLength/1024, bytePerSec)
+							previousByte = p.N()
+							previousTime = time.Now()
+						}
 					}
-					fmt.Println("\rdownload is completed")
 				}()
 				if _, err := client.Installer.DownloadClusterISO(context.Background(), &installer.DownloadClusterISOParams{
 					ClusterID: *cluster.ID,
 				}, progressWriter); err != nil {
-					ctx.Done()
+					fmt.Println()
 					klog.Errorf("%d attempt of 5 failed with err %+v. Retrying\n", attempt, err)
-
+					cancel()
 					if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err == nil {
 						if err := os.Remove(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err != nil {
 							klog.Error(err)
 						}
 					}
 					if attempt == 5 {
+						cancel()
 						klog.Fatal(err)
 					}
 					attempt++
 
 				} else {
-					ctx.Done()
+					cancel()
+					fmt.Println("\rdownload is completed")
 					success = true
 				}
-
 			}
 		}
 

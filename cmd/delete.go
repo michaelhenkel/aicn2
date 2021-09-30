@@ -85,7 +85,8 @@ var delete = &cobra.Command{
 			klog.Fatal(err)
 		}
 		infraInterface = c
-		if err := infraInterface.DeleteVMS(args[0], controllerCounter, workerCounter); err != nil {
+		hostList, err := infraInterface.DeleteVMS(args[0], controllerCounter, workerCounter)
+		if err != nil {
 			klog.Fatal(err)
 		}
 		if err := infraInterface.DeleteDNSLB(args[0]); err != nil {
@@ -101,7 +102,7 @@ var delete = &cobra.Command{
 		if err := infraInterface.DeleteStorage(infrastructure.Image{
 			Name: args[0],
 			Path: fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, args[0]),
-		}, controllerCounter, workerCounter); err != nil {
+		}, controllerCounter, workerCounter, hostList); err != nil {
 			klog.Fatal(err)
 		}
 	},

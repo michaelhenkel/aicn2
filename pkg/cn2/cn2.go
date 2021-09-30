@@ -390,24 +390,35 @@ func (c *CN2) CreateVMS(name, domainName string, controller int, worker int) err
 	return nil
 }
 
-func (c *CN2) DeleteVMS(name string, controller, worker int) error {
+func (c *CN2) DeleteVMS(name string, controller, worker int) (map[string]string, error) {
+	var hostMap = make(map[string]string)
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", name, i)
+		vmi, err := c.Client.Kubevirt.VirtualMachineInstance(name).Get(nodename, &metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		hostMap[nodename] = vmi.Status.NodeName
 		if err := c.Client.Kubevirt.VirtualMachineInstance(name).Delete(nodename, &metav1.DeleteOptions{}); err != nil {
 			if !errors.IsNotFound(err) {
-				return err
+				return nil, err
 			}
 		}
 	}
 	for i := 0; i < worker; i++ {
 		nodename := fmt.Sprintf("%s-worker-%d", name, i)
+		vmi, err := c.Client.Kubevirt.VirtualMachineInstance(name).Get(nodename, &metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		hostMap[nodename] = vmi.Status.NodeName
 		if err := c.Client.Kubevirt.VirtualMachineInstance(name).Delete(nodename, &metav1.DeleteOptions{}); err != nil {
 			if !errors.IsNotFound(err) {
-				return err
+				return nil, err
 			}
 		}
 	}
-	return nil
+	return hostMap, nil
 }
 
 func (c *CN2) CreateStorage(image infrastructure.Image, controller int, worker int) error {
@@ -445,7 +456,7 @@ func (c *CN2) CreateStorage(image infrastructure.Image, controller int, worker i
 	return nil
 }
 
-func (c *CN2) DeleteStorage(image infrastructure.Image, controller int, worker int) error {
+func (c *CN2) DeleteStorage(image infrastructure.Image, controller int, worker int, hostMap map[string]string) error {
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", image.Name, i)
 		if err := c.deletePVandPVC(nodename, image.Name); err != nil {
@@ -453,6 +464,13 @@ func (c *CN2) DeleteStorage(image infrastructure.Image, controller int, worker i
 		}
 
 		if err := deleteGlusterFSVolumes(nodename, image.Path); err != nil {
+			return err
+		}
+		node := hostMap[nodename]
+		rmCommand := fmt.Sprintf("rm -f /var/glusterfsmnt/%s-images/%s.img", node, nodename)
+		stderr, err := RunSudo(rmCommand, "")
+		if err != nil {
+			klog.Error(stderr.String(), err)
 			return err
 		}
 	}
@@ -463,6 +481,13 @@ func (c *CN2) DeleteStorage(image infrastructure.Image, controller int, worker i
 		}
 
 		if err := deleteGlusterFSVolumes(nodename, image.Path); err != nil {
+			return err
+		}
+		node := hostMap[nodename]
+		rmCommand := fmt.Sprintf("rm -f /var/glusterfsmnt/%s-images/%s.img", node, nodename)
+		stderr, err := RunSudo(rmCommand, "")
+		if err != nil {
+			klog.Error(stderr.String(), err)
 			return err
 		}
 	}
@@ -482,19 +507,19 @@ func (c *CN2) deletePVandPVC(name, namespace string) error {
 			return err
 		}
 	}
-
-	if err := c.Client.K8S.CoreV1().PersistentVolumeClaims(namespace).Delete(context.Background(), fmt.Sprintf("%s-disk", name), metav1.DeleteOptions{}); err != nil {
-		if !errors.IsNotFound(err) {
-			return err
+	/*
+		if err := c.Client.K8S.CoreV1().PersistentVolumeClaims(namespace).Delete(context.Background(), fmt.Sprintf("%s-disk", name), metav1.DeleteOptions{}); err != nil {
+			if !errors.IsNotFound(err) {
+				return err
+			}
 		}
-	}
 
-	if err := c.Client.K8S.CoreV1().PersistentVolumes().Delete(context.Background(), fmt.Sprintf("%s-disk", name), metav1.DeleteOptions{}); err != nil {
-		if !errors.IsNotFound(err) {
-			return err
+		if err := c.Client.K8S.CoreV1().PersistentVolumes().Delete(context.Background(), fmt.Sprintf("%s-disk", name), metav1.DeleteOptions{}); err != nil {
+			if !errors.IsNotFound(err) {
+				return err
+			}
 		}
-	}
-
+	*/
 	if err := c.Client.K8S.CoreV1().Endpoints(name).Delete(context.Background(), "glusterfs-cluster", metav1.DeleteOptions{}); err != nil {
 		if !errors.IsNotFound(err) {
 			return err
@@ -562,52 +587,54 @@ func (c *CN2) createPVandPVC(name, namespace string) error {
 			return err
 		}
 	}
+	/*
 
-	diskPV := &v1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-disk", name),
-			Namespace: namespace,
-		},
-		Spec: v1.PersistentVolumeSpec{
-			Capacity: v1.ResourceList{
-				"storage": resource.MustParse("120Gi"),
+		diskPV := &v1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-disk", name),
+				Namespace: namespace,
 			},
-			AccessModes: []v1.PersistentVolumeAccessMode{"ReadWriteMany"},
-			PersistentVolumeSource: v1.PersistentVolumeSource{
-				Glusterfs: &v1.GlusterfsPersistentVolumeSource{
-					ReadOnly:           false,
-					EndpointsNamespace: &epNamespace,
-					EndpointsName:      "glusterfs-cluster",
-					Path:               fmt.Sprintf("%s-disk", name),
-				},
-			},
-		},
-	}
-	if _, err := c.Client.K8S.CoreV1().PersistentVolumes().Create(context.Background(), diskPV, metav1.CreateOptions{}); err != nil {
-		if !errors.IsAlreadyExists(err) {
-			return err
-		}
-	}
-
-	diskPVC := &v1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-disk", name),
-			Namespace: namespace,
-		},
-		Spec: v1.PersistentVolumeClaimSpec{
-			AccessModes: []v1.PersistentVolumeAccessMode{"ReadWriteMany"},
-			Resources: v1.ResourceRequirements{
-				Requests: v1.ResourceList{
+			Spec: v1.PersistentVolumeSpec{
+				Capacity: v1.ResourceList{
 					"storage": resource.MustParse("120Gi"),
 				},
+				AccessModes: []v1.PersistentVolumeAccessMode{"ReadWriteMany"},
+				PersistentVolumeSource: v1.PersistentVolumeSource{
+					Glusterfs: &v1.GlusterfsPersistentVolumeSource{
+						ReadOnly:           false,
+						EndpointsNamespace: &epNamespace,
+						EndpointsName:      "glusterfs-cluster",
+						Path:               fmt.Sprintf("%s-disk", name),
+					},
+				},
 			},
-		},
-	}
-	if _, err := c.Client.K8S.CoreV1().PersistentVolumeClaims(namespace).Create(context.Background(), diskPVC, metav1.CreateOptions{}); err != nil {
-		if !errors.IsAlreadyExists(err) {
-			return err
 		}
-	}
+		if _, err := c.Client.K8S.CoreV1().PersistentVolumes().Create(context.Background(), diskPV, metav1.CreateOptions{}); err != nil {
+			if !errors.IsAlreadyExists(err) {
+				return err
+			}
+		}
+
+		diskPVC := &v1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-disk", name),
+				Namespace: namespace,
+			},
+			Spec: v1.PersistentVolumeClaimSpec{
+				AccessModes: []v1.PersistentVolumeAccessMode{"ReadWriteMany"},
+				Resources: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						"storage": resource.MustParse("120Gi"),
+					},
+				},
+			},
+		}
+		if _, err := c.Client.K8S.CoreV1().PersistentVolumeClaims(namespace).Create(context.Background(), diskPVC, metav1.CreateOptions{}); err != nil {
+			if !errors.IsAlreadyExists(err) {
+				return err
+			}
+		}
+	*/
 
 	return nil
 }
@@ -658,34 +685,35 @@ func createGlusterFSVolumes(name string) error {
 			return err
 		}
 	}
-
-	diskVolumeExists := true
-	diskVolumeInfoCommandString := fmt.Sprintf("gluster volume info %s-disk", name)
-	stderr, err = RunSudo(diskVolumeInfoCommandString, "")
-	if err != nil {
-		if strings.Trim(stderr.String(), "\n") == fmt.Sprintf("Volume %s-disk does not exist", name) {
-			diskVolumeExists = false
-		} else {
-			klog.Error(stderr.String(), diskVolumeInfoCommandString)
-			return err
-		}
-	}
-
-	if !diskVolumeExists {
-		diskVolumeCreateCommandString := fmt.Sprintf("gluster volume create %s-disk 5b3s30.cluster1.local:/glusterfs/%s-disk", name, name)
-		stderr, err := RunSudo(diskVolumeCreateCommandString, "")
+	/*
+		diskVolumeExists := true
+		diskVolumeInfoCommandString := fmt.Sprintf("gluster volume info %s-disk", name)
+		stderr, err = RunSudo(diskVolumeInfoCommandString, "")
 		if err != nil {
-			klog.Error(stderr.String(), diskVolumeCreateCommandString)
-			return err
+			if strings.Trim(stderr.String(), "\n") == fmt.Sprintf("Volume %s-disk does not exist", name) {
+				diskVolumeExists = false
+			} else {
+				klog.Error(stderr.String(), diskVolumeInfoCommandString)
+				return err
+			}
 		}
 
-		diskVolumeStartCommandString := fmt.Sprintf("gluster volume start %s-disk", name)
-		stderr, err = RunSudo(diskVolumeStartCommandString, "")
-		if err != nil {
-			klog.Error(stderr.String())
-			return err
+		if !diskVolumeExists {
+			diskVolumeCreateCommandString := fmt.Sprintf("gluster volume create %s-disk 5b3s30.cluster1.local:/glusterfs/%s-disk", name, name)
+			stderr, err := RunSudo(diskVolumeCreateCommandString, "")
+			if err != nil {
+				klog.Error(stderr.String(), diskVolumeCreateCommandString)
+				return err
+			}
+
+			diskVolumeStartCommandString := fmt.Sprintf("gluster volume start %s-disk", name)
+			stderr, err = RunSudo(diskVolumeStartCommandString, "")
+			if err != nil {
+				klog.Error(stderr.String())
+				return err
+			}
 		}
-	}
+	*/
 	return nil
 }
 
@@ -722,24 +750,26 @@ func deleteGlusterFSVolumes(name, path string) error {
 			klog.Error(stderr.String())
 			return err
 		}
+		/*
 
-		stderr, err = RunSudo(fmt.Sprintf("gluster volume stop %s-disk", name), "y")
-		if err != nil {
-			klog.Error(stderr.String())
-			return err
-		}
+			stderr, err = RunSudo(fmt.Sprintf("gluster volume stop %s-disk", name), "y")
+			if err != nil {
+				klog.Error(stderr.String())
+				return err
+			}
 
-		stderr, err = RunSudo(fmt.Sprintf("gluster volume delete %s-disk", name), "y")
-		if err != nil {
-			klog.Error(stderr.String())
-			return err
-		}
+			stderr, err = RunSudo(fmt.Sprintf("gluster volume delete %s-disk", name), "y")
+			if err != nil {
+				klog.Error(stderr.String())
+				return err
+			}
 
-		stderr, err = RunSudo(fmt.Sprintf("rm -rf /glusterfs/%s-disk", name), "")
-		if err != nil {
-			klog.Error(stderr.String())
-			return err
-		}
+			stderr, err = RunSudo(fmt.Sprintf("rm -rf /glusterfs/%s-disk", name), "")
+			if err != nil {
+				klog.Error(stderr.String())
+				return err
+			}
+		*/
 	}
 
 	/*
