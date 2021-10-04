@@ -30,7 +30,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: ApiServerSpec defines the configuration for contrail-k8s-apiserver deployment
+            description: 'Specification of the desired state of the ApiServer. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status'
             properties:
               apiMetricsBindAddress:
                 description: (Not currently used)
@@ -1856,9 +1856,6 @@ spec:
                       type: string
                     description: k8s node selectors. A node selector represents the union of the results of one or more label queries over a set of nodes; that is, it represents the OR of the selectors represented by the node selector terms.
                     type: object
-                  platform:
-                    description: Platform specifies the platform
-                    type: string
                   replicas:
                     description: k8s desired number of replicas.
                     format: int32
@@ -1925,8 +1922,11 @@ spec:
                 type: string
             type: object
           status:
-            description: ApiServerStatus defines the observed state of ApiServer. Overall Apiserver status can be found in Status.Status while detailed Apiserver status can be found in Status.Conditions.
+            description: 'The most recently observed status of the ApiServer. This data may not be up-to-date. Populated by the system. Read-only. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status'
             properties:
+              apiVersion:
+                description: 'APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+                type: string
               conditions:
                 description: Conditions contains detail info and status result of transitions
                 items:
@@ -1963,11 +1963,17 @@ spec:
                   - type
                   type: object
                 type: array
+              kind:
+                description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                type: string
+              metadata:
+                type: object
               phase:
                 description: Phase indicates the current Phase the API server is operating at
                 type: string
+              platform:
+                type: string
               status:
-                description: Status indicates the current overall status, values are True/False and Unknown
                 type: string
             required:
             - phase
@@ -1976,6 +1982,8 @@ spec:
         type: object
     served: true
     storage: true
+    subresources:
+      status: {}
 status:
   acceptedNames:
     kind: ""

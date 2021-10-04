@@ -5,7 +5,6 @@ metadata:
   namespace: contrail
 spec:
   common:
-    platform: ocp
     containers:
     - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-kubemanager:latest
       name: contrail-k8s-kubemanager

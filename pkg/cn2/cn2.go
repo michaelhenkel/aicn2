@@ -62,6 +62,71 @@ func (c *CN2) GetClusterDomain(name string) (string, error) {
 }
 
 func (c *CN2) CreateVN(name, subnet string) error {
+	/*
+		sn := &corev1alpha1.Subnet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-v4", name),
+				Namespace: name,
+			},
+			Spec: corev1alpha1.SubnetSpec{
+				CIDR:           corev1alpha1.CIDR(subnet),
+				DefaultGateway: corev1alpha1.IPAddress("10.87.73.14"),
+				Ranges: []corev1alpha1.Range{{
+					Key: "contrail-k8s-kubemanager-cluster1-local-5b3s31",
+					IPRanges: []corev1alpha1.IPRange{{
+						From: corev1alpha1.IPAddress("10.87.73.5"),
+						To:   corev1alpha1.IPAddress("10.87.73.6"),
+					}},
+				}, {
+					Key: "contrail-k8s-kubemanager-cluster1-local-5b3s32",
+					IPRanges: []corev1alpha1.IPRange{{
+						From: corev1alpha1.IPAddress("10.87.73.7"),
+						To:   corev1alpha1.IPAddress("10.87.73.8"),
+					}},
+				}, {
+					Key: "contrail-k8s-kubemanager-cluster1-local-5b3s33",
+					IPRanges: []corev1alpha1.IPRange{{
+						From: corev1alpha1.IPAddress("10.87.73.9"),
+						To:   corev1alpha1.IPAddress("10.87.73.10"),
+					}},
+				}},
+			},
+		}
+		if _, err := c.Client.Contrail.CoreV1alpha1().Subnets(name).Create(context.Background(), sn, metav1.CreateOptions{}); err != nil {
+			if !errors.IsAlreadyExists(err) {
+				return err
+			}
+		}
+		vn := &corev1alpha1.VirtualNetwork{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: name,
+			},
+			Spec: corev1alpha1.VirtualNetworkSpec{
+				V4SubnetReference: &corev1alpha1.ResourceReference{
+					ObjectReference: v1.ObjectReference{
+						Name:       sn.Name,
+						Namespace:  sn.Namespace,
+						Kind:       "Subnet",
+						APIVersion: "core.contrail.juniper.net/v1alpha1",
+					},
+				},
+				ProviderNetworkReference: &corev1alpha1.ResourceReference{
+					ObjectReference: v1.ObjectReference{
+						Name:       "ip-fabric",
+						Namespace:  "contrail",
+						Kind:       "VirtualNetwork",
+						APIVersion: "core.contrail.juniper.net/v1alpha1",
+					},
+				},
+			},
+		}
+		if _, err := c.Client.Contrail.CoreV1alpha1().VirtualNetworks(name).Create(context.Background(), vn, metav1.CreateOptions{}); err != nil {
+			if !errors.IsAlreadyExists(err) {
+				return err
+			}
+		}
+	*/
 	if _, err := c.Client.Nad.K8sCniCncfIoV1().NetworkAttachmentDefinitions(name).Get(context.Background(), name, metav1.GetOptions{}); err != nil {
 		if errors.IsNotFound(err) {
 			nad := &nadv1.NetworkAttachmentDefinition{
@@ -251,19 +316,19 @@ func defineVMI(name, clustername, role, nameserver, domainName string) *kubevirt
 				Searches:    []string{fmt.Sprintf("%s.%s", clustername, domainName)},
 			},
 			Networks: []kubevirtV1.Network{{
+				/*
+						Name: clustername,
+						NetworkSource: kubevirtV1.NetworkSource{
+							Multus: &kubevirtV1.MultusNetwork{
+								NetworkName: fmt.Sprintf("%s/%s", clustername, clustername),
+							},
+						},
+					}, {
+				*/
 				Name: "default",
 				NetworkSource: kubevirtV1.NetworkSource{
 					Pod: &kubevirtV1.PodNetwork{},
 				},
-				/*
-					}, {
-						Name: name,
-						NetworkSource: kubevirtV1.NetworkSource{
-							Multus: &kubevirtV1.MultusNetwork{
-								NetworkName: fmt.Sprintf("%s/%s", name, name),
-							},
-						},
-				*/
 			}},
 			Domain: kubevirtV1.DomainSpec{
 				CPU: &kubevirtV1.CPU{
@@ -286,7 +351,7 @@ func defineVMI(name, clustername, role, nameserver, domainName string) *kubevirt
 						},
 						/*
 							}, {
-								Name: name,
+								Name: clustername,
 								InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
 									Bridge: &kubevirtV1.InterfaceBridge{},
 								},
