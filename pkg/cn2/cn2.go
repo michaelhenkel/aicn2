@@ -347,7 +347,6 @@ func defineVMI(name, clustername, role, nameserver, domainName string) *kubevirt
 				Resources: kubevirtV1.ResourceRequirements{
 					Requests: v1.ResourceList{
 						"memory": resource.MustParse("32Gi"),
-						//"cpu":    resource.MustParse("8"),
 					},
 				},
 				Devices: kubevirtV1.Devices{
@@ -389,27 +388,13 @@ func defineVMI(name, clustername, role, nameserver, domainName string) *kubevirt
 					EmptyDisk: &kubevirtV1.EmptyDiskSource{
 						Capacity: resource.MustParse("120Gi"),
 					},
-					/*
-						HostDisk: &kubevirtV1.HostDisk{
-							Capacity: resource.MustParse("120Gi"),
-							Path:     fmt.Sprintf("/glusterfs/images/%s.img", name),
-							Type:     kubevirtV1.HostDiskExistsOrCreate,
-						},
-					*/
 				},
-				/*
-					VolumeSource: kubevirtV1.VolumeSource{
-						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
-							ClaimName: fmt.Sprintf("%s-disk", name),
-							ReadOnly:  false,
-						},
-					},
-				*/
 			}, {
 				Name: fmt.Sprintf("%s-iso", name),
 				VolumeSource: kubevirtV1.VolumeSource{
 					ContainerDisk: &kubevirtV1.ContainerDiskSource{
-						Image: fmt.Sprintf("%s/%s", REGISTRY, name),
+						Image:           fmt.Sprintf("%s/%s", REGISTRY, name),
+						ImagePullPolicy: v1.PullAlways,
 					},
 				},
 			}},
@@ -498,27 +483,40 @@ func (c *CN2) DeleteVMS(name string, controller, worker int) (map[string]string,
 }
 
 func (c *CN2) CreateStorage(image infrastructure.Image, controller int, worker int) error {
-	ci, err := containerImage.NewContainerImage(image.Name, REGISTRY, filepath.Dir(image.Path))
-	if err != nil {
-		return err
-	}
-	klog.Info("CN2: Building and Pushing Base ISO Image Container")
-	if err := ci.BuildBaseImage(); err != nil {
-		return err
-	}
+
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", image.Name, i)
-		klog.Infof("CN2: Tagging and Uploading ISO Container for node %s", nodename)
-		if err := ci.TagAndPush(nodename); err != nil {
+		ci, err := containerImage.NewContainerImage(nodename, REGISTRY, filepath.Dir(image.Path))
+		if err != nil {
 			return err
 		}
+		klog.Infof("CN2: Building and Pushing ISO Image Container for %s", nodename)
+		if err := ci.BuildBaseImage(); err != nil {
+			return err
+		}
+		/*
+			klog.Infof("CN2: Tagging and Uploading ISO Container for node %s", nodename)
+			if err := ci.TagAndPush(nodename); err != nil {
+				return err
+			}
+		*/
 	}
 	for i := 0; i < worker; i++ {
 		nodename := fmt.Sprintf("%s-worker-%d", image.Name, i)
-		klog.Infof("CN2: Tagging and Uploading ISO Container for node %s", nodename)
-		if err := ci.TagAndPush(nodename); err != nil {
+		ci, err := containerImage.NewContainerImage(nodename, REGISTRY, filepath.Dir(image.Path))
+		if err != nil {
 			return err
 		}
+		klog.Infof("CN2: Building and Pushing ISO Image Container for %s", nodename)
+		if err := ci.BuildBaseImage(); err != nil {
+			return err
+		}
+		/*
+			klog.Infof("CN2: Tagging and Uploading ISO Container for node %s", nodename)
+			if err := ci.TagAndPush(nodename); err != nil {
+				return err
+			}
+		*/
 	}
 	return nil
 }

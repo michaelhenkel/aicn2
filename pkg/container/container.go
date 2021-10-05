@@ -65,22 +65,6 @@ ADD --chown=107:107 disk.img /disk/`
 	return nil
 }
 
-func (c *containerImage) TagAndPush(newImage string) error {
-	tagCmd := fmt.Sprintf("docker tag %s/%s %s/%s", c.Registry, c.Name, c.Registry, newImage)
-	stderr, err := runCmd(tagCmd)
-	if err != nil {
-		klog.Error(stderr.String(), tagCmd, err)
-		return err
-	}
-	pushCmd := fmt.Sprintf("docker push %s/%s", c.Registry, newImage)
-	stderr, err = runCmd(pushCmd)
-	if err != nil {
-		klog.Error(stderr.String(), pushCmd, err)
-		return err
-	}
-	return nil
-}
-
 func runCmd(command string) (bytes.Buffer, error) {
 	var outb, errb bytes.Buffer
 	commandList := strings.Split(command, " ")
