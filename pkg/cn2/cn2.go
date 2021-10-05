@@ -316,6 +316,7 @@ func defineVMI(name, clustername, role, nameserver, domainName string) *kubevirt
 			Labels:    map[string]string{"occluster": clustername, "role": role},
 		},
 		Spec: kubevirtV1.VirtualMachineInstanceSpec{
+			Hostname:  name,
 			DNSPolicy: v1.DNSNone,
 			DNSConfig: &v1.PodDNSConfig{
 				Nameservers: []string{nameserver},
@@ -501,17 +502,20 @@ func (c *CN2) CreateStorage(image infrastructure.Image, controller int, worker i
 	if err != nil {
 		return err
 	}
+	klog.Info("CN2: Building and Pushing Base ISO Image Container")
 	if err := ci.BuildBaseImage(); err != nil {
 		return err
 	}
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", image.Name, i)
+		klog.Infof("CN2: Tagging and Uploading ISO Container for node %s", nodename)
 		if err := ci.TagAndPush(nodename); err != nil {
 			return err
 		}
 	}
 	for i := 0; i < worker; i++ {
 		nodename := fmt.Sprintf("%s-worker-%d", image.Name, i)
+		klog.Infof("CN2: Tagging and Uploading ISO Container for node %s", nodename)
 		if err := ci.TagAndPush(nodename); err != nil {
 			return err
 		}

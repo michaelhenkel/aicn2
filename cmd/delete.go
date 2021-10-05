@@ -84,7 +84,7 @@ var delete = &cobra.Command{
 			klog.Fatal(err)
 		}
 		infraInterface = c
-		hostList, err := infraInterface.DeleteVMS(args[0], controllerCounter, workerCounter)
+		_, err = infraInterface.DeleteVMS(args[0], controllerCounter, workerCounter)
 		if err != nil {
 			klog.Fatal(err)
 		}

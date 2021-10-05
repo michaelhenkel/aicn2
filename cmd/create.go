@@ -176,7 +176,7 @@ EOF
 	success=2
   fi
   rm ${tmp}
-  sleep 2
+  sleep 60
 done`
 			encodedScript := base64.StdEncoding.EncodeToString([]byte(serviceScript))
 			ingitionConfig := fmt.Sprintf(`{
