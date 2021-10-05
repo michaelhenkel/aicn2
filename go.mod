@@ -3,17 +3,19 @@ module github.com/michaelhenkel/aicn2
 go 1.16
 
 require (
+	github.com/docker/docker v20.10.9+incompatible
 	github.com/go-openapi/runtime v0.19.31
 	github.com/go-openapi/strfmt v0.20.2 // indirect
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.1.0
-	github.com/machinebox/progress v0.2.0 // indirect
-	github.com/mitchellh/ioprogress v0.0.0-20180201004757-6a23b12fa88e // indirect
+	github.com/machinebox/progress v0.2.0
+	github.com/matryer/is v1.4.0 // indirect
+	github.com/moby/sys/mount v0.2.0 // indirect
 	github.com/openshift/assisted-service v1.0.10-0.20210825070125-6ba8da87d788
-	github.com/sirupsen/logrus v1.8.1 // indirect
+	github.com/pborman/uuid v1.2.1 // indirect
 	github.com/spf13/cobra v1.2.1
-	github.com/txn2/txeh v1.3.0 // indirect
-	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83 // indirect
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
+	github.com/txn2/txeh v1.3.0
+	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 	k8s.io/api v0.21.1
 	k8s.io/apimachinery v0.21.1
 	k8s.io/client-go v12.0.0+incompatible
@@ -25,6 +27,7 @@ require (
 )
 
 replace (
+	github.com/containerd/containerd => github.com/containerd/containerd v1.5.7
 	github.com/containers/podman/v2 => github.com/containers/libpod/v2 v2.2.1
 	github.com/go-kit/kit => github.com/go-kit/kit v0.3.0
 	github.com/googleapis/gnostic => github.com/googleapis/gnostic v0.4.1

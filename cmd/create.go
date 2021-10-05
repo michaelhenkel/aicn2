@@ -28,7 +28,7 @@ import (
 
 var (
 	file       string
-	noiso      bool
+	skipiso    bool
 	worker     int
 	controller int
 	nocontrail bool
@@ -38,7 +38,7 @@ func init() {
 	create.PersistentFlags().StringVarP(&file, "file", "f", "", "access token file")
 	create.PersistentFlags().IntVarP(&worker, "worker", "w", 0, "worker count")
 	create.PersistentFlags().IntVarP(&controller, "controller", "c", 1, "controller count")
-	create.PersistentFlags().BoolVar(&noiso, "noiso", false, "don't create iso")
+	create.PersistentFlags().BoolVar(&skipiso, "skipiso", false, "don't create iso")
 	create.PersistentFlags().BoolVar(&nocontrail, "nocontrail", false, "don't install contrail")
 }
 
@@ -232,74 +232,76 @@ done`
 				}
 			}
 
-			klog.Info("Downloading ISO")
-
-			attempt := 1
-			success := false
-			for !success {
-				isoHeaderResp, err := client.Installer.DownloadClusterISOHeaders(context.Background(), &installer.DownloadClusterISOHeadersParams{
-					ClusterID: *cluster.ID,
-				})
-				if err != nil {
-					klog.Fatal(err)
-				}
-				out, err := os.Create(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name))
-				if err != nil {
-					klog.Fatal(err)
-				}
-				defer out.Close()
-				progressWriter := progress.NewWriter(out)
-				ctx, cancel := context.WithCancel(context.Background())
-				defer cancel()
-				go func() {
-					progressChan := progress.NewTicker(ctx, progressWriter, isoHeaderResp.ContentLength, 1*time.Second)
-					var previousTime time.Time
-					var previousByte int64
-					for p := range progressChan {
-						select {
-						case <-ctx.Done():
-							return
-						default:
-							var bytePerSec int64
-							if previousByte != 0 {
-								transferedBytes := p.N() - previousByte
-								duration := time.Since(previousTime).Milliseconds()
-								if duration > 0 && transferedBytes > 0 {
-									durationSec := duration / 1000
-									transferedKbytes := transferedBytes / 1024
-									if durationSec > 0 && transferedKbytes > 0 {
-										bytePerSec = transferedKbytes / durationSec
-									}
-
-								}
-							}
-							fmt.Printf("\r%v remaining. %d of %d written... %d kbyte/sec", p.Remaining().Round(time.Second), p.N()/1024, isoHeaderResp.ContentLength/1024, bytePerSec)
-							previousByte = p.N()
-							previousTime = time.Now()
-						}
-					}
-				}()
-				if _, err := client.Installer.DownloadClusterISO(context.Background(), &installer.DownloadClusterISOParams{
-					ClusterID: *cluster.ID,
-				}, progressWriter); err != nil {
-					fmt.Println()
-					klog.Errorf("%d attempt of 5 failed with err %+v. Retrying\n", attempt, err)
-					cancel()
-					if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err == nil {
-						if err := os.Remove(fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, *createCluster.Name)); err != nil {
-							klog.Error(err)
-						}
-					}
-					if attempt == 5 {
-						cancel()
+			if !skipiso {
+				klog.Info("Downloading ISO")
+				attempt := 1
+				success := false
+				for !success {
+					isoHeaderResp, err := client.Installer.DownloadClusterISOHeaders(context.Background(), &installer.DownloadClusterISOHeadersParams{
+						ClusterID: *cluster.ID,
+					})
+					if err != nil {
 						klog.Fatal(err)
 					}
-					attempt++
+					out, err := os.Create(fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, *createCluster.Name))
+					if err != nil {
+						klog.Fatal(err)
+					}
+					defer out.Close()
+					progressWriter := progress.NewWriter(out)
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+					go func() {
+						progressChan := progress.NewTicker(ctx, progressWriter, isoHeaderResp.ContentLength, 1*time.Second)
+						var previousTime time.Time
+						var previousByte int64
+						for p := range progressChan {
+							select {
+							case <-ctx.Done():
+								return
+							default:
+								var bytePerSec int64
+								if previousByte != 0 {
+									transferedBytes := p.N() - previousByte
+									duration := time.Since(previousTime).Milliseconds()
+									if duration > 0 && transferedBytes > 0 {
+										durationSec := duration / 1000
+										transferedKbytes := transferedBytes / 1024
+										if durationSec > 0 && transferedKbytes > 0 {
+											bytePerSec = transferedKbytes / durationSec
+										}
 
-				} else {
-					cancel()
-					fmt.Println("\rdownload is completed")
-					success = true
+									}
+								}
+								fmt.Printf("\r%v remaining. %d of %d written... %d kbyte/sec", p.Remaining().Round(time.Second), p.N()/1024, isoHeaderResp.ContentLength/1024, bytePerSec)
+								previousByte = p.N()
+								previousTime = time.Now()
+							}
+						}
+					}()
+					if _, err := client.Installer.DownloadClusterISO(context.Background(), &installer.DownloadClusterISOParams{
+						ClusterID: *cluster.ID,
+					}, progressWriter); err != nil {
+						fmt.Println()
+						klog.Errorf("%d attempt of 5 failed with err %+v. Retrying\n", attempt, err)
+						cancel()
+						if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, *createCluster.Name)); err == nil {
+							if err := os.Remove(fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, *createCluster.Name)); err != nil {
+								klog.Error(err)
+							}
+						}
+						if attempt == 5 {
+							cancel()
+							klog.Fatal(err)
+						}
+						attempt++
+
+					} else {
+						cancel()
+						fmt.Println("\rdownload is completed")
+						out.Close()
+						success = true
+					}
 				}
 			}
 		}
@@ -307,7 +309,7 @@ done`
 		klog.Info("Preparing Storage")
 		if err := infraInterface.CreateStorage(infrastructure.Image{
 			Name: cluster.Name,
-			Path: fmt.Sprintf("%s/.aicn2/%s/discover.iso", homedir, cluster.Name),
+			Path: fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, cluster.Name),
 		}, controller, worker); err != nil {
 			klog.Fatal(err)
 		}

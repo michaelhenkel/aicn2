@@ -10,7 +10,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "main.go",
-            "args": ["create","oc","-f","config.json","-w","2","-c","3"]
+            "args": ["create","oc","-f","config.json","-w","0","-c","1","--skipiso"]
         },
         {
             "name": "list",
