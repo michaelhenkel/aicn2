@@ -305,103 +305,114 @@ func (c *CN2) DeleteDNSLB(name string) error {
 	return nil
 }
 
-func defineVMI(name, clustername, role, nameserver, domainName string) *kubevirtV1.VirtualMachineInstance {
+func defineVM(name, clustername, role, nameserver, domainName string) *kubevirtV1.VirtualMachine {
 	var firstBootOrder uint = 1
 	var secondBootOrder uint = 2
-
-	vmi := &kubevirtV1.VirtualMachineInstance{
+	running := true
+	vm := &kubevirtV1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: clustername,
 			Labels:    map[string]string{"occluster": clustername, "role": role},
 		},
-		Spec: kubevirtV1.VirtualMachineInstanceSpec{
-			Hostname:  name,
-			DNSPolicy: v1.DNSNone,
-			DNSConfig: &v1.PodDNSConfig{
-				Nameservers: []string{nameserver},
-				Searches:    []string{fmt.Sprintf("%s.%s", clustername, domainName)},
-			},
-			Networks: []kubevirtV1.Network{{
-				/*
-						Name: clustername,
+		Spec: kubevirtV1.VirtualMachineSpec{
+			Running: &running,
+			Template: &kubevirtV1.VirtualMachineInstanceTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: clustername,
+					Labels:    map[string]string{"occluster": clustername, "role": role},
+				},
+				Spec: kubevirtV1.VirtualMachineInstanceSpec{
+					Hostname:  name,
+					DNSPolicy: v1.DNSNone,
+					DNSConfig: &v1.PodDNSConfig{
+						Nameservers: []string{nameserver},
+						Searches:    []string{fmt.Sprintf("%s.%s", clustername, domainName)},
+					},
+					Networks: []kubevirtV1.Network{{
+						/*
+								Name: clustername,
+								NetworkSource: kubevirtV1.NetworkSource{
+									Multus: &kubevirtV1.MultusNetwork{
+										NetworkName: fmt.Sprintf("%s/%s", clustername, clustername),
+									},
+								},
+							}, {
+						*/
+						Name: "default",
 						NetworkSource: kubevirtV1.NetworkSource{
-							Multus: &kubevirtV1.MultusNetwork{
-								NetworkName: fmt.Sprintf("%s/%s", clustername, clustername),
+							Pod: &kubevirtV1.PodNetwork{},
+						},
+					}},
+					Domain: kubevirtV1.DomainSpec{
+						CPU: &kubevirtV1.CPU{
+							Sockets:               12,
+							Threads:               1,
+							Cores:                 1,
+							DedicatedCPUPlacement: true,
+						},
+						Resources: kubevirtV1.ResourceRequirements{
+							Requests: v1.ResourceList{
+								"memory": resource.MustParse("32Gi"),
 							},
 						},
-					}, {
-				*/
-				Name: "default",
-				NetworkSource: kubevirtV1.NetworkSource{
-					Pod: &kubevirtV1.PodNetwork{},
-				},
-			}},
-			Domain: kubevirtV1.DomainSpec{
-				CPU: &kubevirtV1.CPU{
-					Sockets:               12,
-					Threads:               1,
-					Cores:                 1,
-					DedicatedCPUPlacement: true,
-				},
-				Resources: kubevirtV1.ResourceRequirements{
-					Requests: v1.ResourceList{
-						"memory": resource.MustParse("32Gi"),
-					},
-				},
-				Devices: kubevirtV1.Devices{
-					Interfaces: []kubevirtV1.Interface{{
-						Name: "default",
-						InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
-							Bridge: &kubevirtV1.InterfaceBridge{},
-						},
-						/*
-							}, {
-								Name: clustername,
+						Devices: kubevirtV1.Devices{
+							Interfaces: []kubevirtV1.Interface{{
+								Name: "default",
 								InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
 									Bridge: &kubevirtV1.InterfaceBridge{},
 								},
-						*/
-					}},
-					Disks: []kubevirtV1.Disk{{
-						Name: fmt.Sprintf("%s-iso", name),
-						DiskDevice: kubevirtV1.DiskDevice{
-							CDRom: &kubevirtV1.CDRomTarget{
-								Bus: "sata",
-							},
+								/*
+									}, {
+										Name: clustername,
+										InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
+											Bridge: &kubevirtV1.InterfaceBridge{},
+										},
+								*/
+							}},
+							Disks: []kubevirtV1.Disk{{
+								Name: fmt.Sprintf("%s-iso", name),
+								DiskDevice: kubevirtV1.DiskDevice{
+									CDRom: &kubevirtV1.CDRomTarget{
+										Bus: "sata",
+									},
+								},
+								BootOrder: &secondBootOrder,
+							}, {
+								Name: fmt.Sprintf("%s-disk", name),
+								DiskDevice: kubevirtV1.DiskDevice{
+									Disk: &kubevirtV1.DiskTarget{
+										Bus: "virtio",
+									},
+								},
+								BootOrder: &firstBootOrder,
+							}},
 						},
-						BootOrder: &secondBootOrder,
-					}, {
+					},
+					Volumes: []kubevirtV1.Volume{{
 						Name: fmt.Sprintf("%s-disk", name),
-						DiskDevice: kubevirtV1.DiskDevice{
-							Disk: &kubevirtV1.DiskTarget{
-								Bus: "virtio",
+						VolumeSource: kubevirtV1.VolumeSource{
+							EmptyDisk: &kubevirtV1.EmptyDiskSource{
+								Capacity: resource.MustParse("120Gi"),
 							},
 						},
-						BootOrder: &firstBootOrder,
+					}, {
+						Name: fmt.Sprintf("%s-iso", name),
+						VolumeSource: kubevirtV1.VolumeSource{
+							ContainerDisk: &kubevirtV1.ContainerDiskSource{
+								Image:           fmt.Sprintf("%s/%s", REGISTRY, name),
+								ImagePullPolicy: v1.PullAlways,
+							},
+						},
 					}},
 				},
 			},
-			Volumes: []kubevirtV1.Volume{{
-				Name: fmt.Sprintf("%s-disk", name),
-				VolumeSource: kubevirtV1.VolumeSource{
-					EmptyDisk: &kubevirtV1.EmptyDiskSource{
-						Capacity: resource.MustParse("120Gi"),
-					},
-				},
-			}, {
-				Name: fmt.Sprintf("%s-iso", name),
-				VolumeSource: kubevirtV1.VolumeSource{
-					ContainerDisk: &kubevirtV1.ContainerDiskSource{
-						Image:           fmt.Sprintf("%s/%s", REGISTRY, name),
-						ImagePullPolicy: v1.PullAlways,
-					},
-				},
-			}},
 		},
 	}
+
 	if role == "controller" {
-		vmi.Spec.ReadinessProbe = &kubevirtV1.Probe{
+		vm.Spec.Template.Spec.ReadinessProbe = &kubevirtV1.Probe{
 			Handler: kubevirtV1.Handler{
 				TCPSocket: &v1.TCPSocketAction{
 					Port: intstr.FromInt(6443),
@@ -410,7 +421,7 @@ func defineVMI(name, clustername, role, nameserver, domainName string) *kubevirt
 		}
 	}
 	if role == "worker" {
-		vmi.Spec.ReadinessProbe = &kubevirtV1.Probe{
+		vm.Spec.Template.Spec.ReadinessProbe = &kubevirtV1.Probe{
 			Handler: kubevirtV1.Handler{
 				HTTPGet: &v1.HTTPGetAction{
 					Path: "/healthz/ready",
@@ -422,7 +433,7 @@ func defineVMI(name, clustername, role, nameserver, domainName string) *kubevirt
 			},
 		}
 	}
-	return vmi
+	return vm
 }
 
 func (c *CN2) CreateVMS(name, domainName string, controller int, worker int) error {
@@ -432,8 +443,8 @@ func (c *CN2) CreateVMS(name, domainName string, controller int, worker int) err
 	}
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", name, i)
-		vmi := defineVMI(nodename, name, "controller", dnsSvc.Spec.ClusterIP, domainName)
-		if _, err := c.Client.Kubevirt.VirtualMachineInstance(name).Create(vmi); err != nil {
+		vm := defineVM(nodename, name, "controller", dnsSvc.Spec.ClusterIP, domainName)
+		if _, err := c.Client.Kubevirt.VirtualMachine(name).Create(vm); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err
 			}
@@ -441,8 +452,8 @@ func (c *CN2) CreateVMS(name, domainName string, controller int, worker int) err
 	}
 	for i := 0; i < worker; i++ {
 		nodename := fmt.Sprintf("%s-worker-%d", name, i)
-		vmi := defineVMI(nodename, name, "worker", dnsSvc.Spec.ClusterIP, domainName)
-		if _, err := c.Client.Kubevirt.VirtualMachineInstance(name).Create(vmi); err != nil {
+		vm := defineVM(nodename, name, "worker", dnsSvc.Spec.ClusterIP, domainName)
+		if _, err := c.Client.Kubevirt.VirtualMachine(name).Create(vm); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err
 			}
@@ -451,35 +462,19 @@ func (c *CN2) CreateVMS(name, domainName string, controller int, worker int) err
 	return nil
 }
 
-func (c *CN2) DeleteVMS(name string, controller, worker int) (map[string]string, error) {
-	var hostMap = make(map[string]string)
-	for i := 0; i < controller; i++ {
-		nodename := fmt.Sprintf("%s-controller-%d", name, i)
-		vmi, err := c.Client.Kubevirt.VirtualMachineInstance(name).Get(nodename, &metav1.GetOptions{})
-		if err != nil {
-			return nil, err
-		}
-		hostMap[nodename] = vmi.Status.NodeName
-		if err := c.Client.Kubevirt.VirtualMachineInstance(name).Delete(nodename, &metav1.DeleteOptions{}); err != nil {
-			if !errors.IsNotFound(err) {
-				return nil, err
-			}
+func (c *CN2) DeleteVMS(name string) error {
+	vmList, err := c.Client.Kubevirt.VirtualMachine(name).List(&metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("occluster=%s", name),
+	})
+	if err != nil {
+		return err
+	}
+	for _, vm := range vmList.Items {
+		if err := c.Client.Kubevirt.VirtualMachine(name).Delete(vm.Name, &metav1.DeleteOptions{}); err != nil {
+			return err
 		}
 	}
-	for i := 0; i < worker; i++ {
-		nodename := fmt.Sprintf("%s-worker-%d", name, i)
-		vmi, err := c.Client.Kubevirt.VirtualMachineInstance(name).Get(nodename, &metav1.GetOptions{})
-		if err != nil {
-			return nil, err
-		}
-		hostMap[nodename] = vmi.Status.NodeName
-		if err := c.Client.Kubevirt.VirtualMachineInstance(name).Delete(nodename, &metav1.DeleteOptions{}); err != nil {
-			if !errors.IsNotFound(err) {
-				return nil, err
-			}
-		}
-	}
-	return hostMap, nil
+	return nil
 }
 
 func (c *CN2) CreateStorage(image infrastructure.Image, controller int, worker int) error {

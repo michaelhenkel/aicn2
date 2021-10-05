@@ -15,8 +15,7 @@ import (
 )
 
 func init() {
-	delete.PersistentFlags().IntVarP(&worker, "worker", "w", 0, "worker count")
-	delete.PersistentFlags().IntVarP(&controller, "controller", "c", 0, "controller count")
+
 }
 
 var delete = &cobra.Command{
@@ -37,21 +36,10 @@ var delete = &cobra.Command{
 			klog.Fatal(err)
 		}
 
-		workerCounter := 0
-		controllerCounter := 0
 		var cluster *models.Cluster
 		for _, cl := range clusterList.GetPayload() {
 			if cl.Name == args[0] {
 				cluster = cl
-				hostList := cluster.Hosts
-				for _, host := range hostList {
-					if host.Role == "worker" {
-						workerCounter++
-					}
-					if host.Role == "master" {
-						controllerCounter++
-					}
-				}
 				if _, err := client.Installer.DeregisterCluster(context.Background(), &installer.DeregisterClusterParams{
 					ClusterID: *cluster.ID,
 				}); err != nil {
@@ -72,20 +60,13 @@ var delete = &cobra.Command{
 				}
 			}
 		}
-		if worker != 0 {
-			workerCounter = worker
-		}
-		if controller != 0 {
-			controllerCounter = controller
-		}
 		var infraInterface infrastructure.InfrastructureInterface
 		c, err := cn2.New()
 		if err != nil {
 			klog.Fatal(err)
 		}
 		infraInterface = c
-		_, err = infraInterface.DeleteVMS(args[0], controllerCounter, workerCounter)
-		if err != nil {
+		if err := infraInterface.DeleteVMS(args[0]); err != nil {
 			klog.Fatal(err)
 		}
 		if err := infraInterface.DeleteDNSLB(args[0]); err != nil {

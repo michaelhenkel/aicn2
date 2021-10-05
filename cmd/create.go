@@ -199,14 +199,6 @@ done`
 		"shouldExist":["ipv6.disable=1"]
 	}
 }`, encodedScript)
-			/*
-			   			ingitionConfig = `{
-			   	"ignition": { "version": "3.1.0" },
-			   	"kernelArguments": {
-			   		"shouldExist":["ipv6.disable=1"]
-			   	}
-			   }`
-			*/
 			klog.Info("Setting Discovery Kernel Arg and CA Patch Service")
 			if _, err := client.Installer.UpdateDiscoveryIgnition(context.Background(), &installer.UpdateDiscoveryIgnitionParams{
 				ClusterID: *cluster.ID,
