@@ -18,10 +18,11 @@ type Client struct {
 	Contrail contrailClient.Clientset
 }
 
-func NewClient() (*Client, error) {
-	var kubeconfig string
-	if home := homedir.HomeDir(); home != "" {
-		kubeconfig = filepath.Join(home, ".kube", "config")
+func NewClient(kubeconfig string) (*Client, error) {
+	if kubeconfig == "" {
+		if home := homedir.HomeDir(); home != "" {
+			kubeconfig = filepath.Join(home, ".kube", "config")
+		}
 	}
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {

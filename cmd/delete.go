@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-
+	delete.PersistentFlags().StringVarP(&registry, "registry", "r", "registry.default.svc.cluster1.local:5000", "container registry for ISO")
 }
 
 var delete = &cobra.Command{
@@ -61,7 +61,7 @@ var delete = &cobra.Command{
 			}
 		}
 		var infraInterface infrastructure.InfrastructureInterface
-		c, err := cn2.New()
+		c, err := cn2.New(registry, kubeconfigPath)
 		if err != nil {
 			klog.Fatal(err)
 		}

@@ -3,6 +3,7 @@ module github.com/michaelhenkel/aicn2
 go 1.16
 
 require (
+	github.com/GehirnInc/crypt v0.0.0-20200316065508-bb7000b8a962 // indirect
 	github.com/docker/docker v20.10.9+incompatible
 	github.com/go-openapi/runtime v0.19.31
 	github.com/go-openapi/strfmt v0.20.2 // indirect

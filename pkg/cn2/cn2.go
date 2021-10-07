@@ -1,6 +1,7 @@
 package cn2
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -27,21 +29,19 @@ import (
 	kubevirtV1 "kubevirt.io/client-go/api/v1"
 )
 
-const (
-	REGISTRY = "registry.default.svc.cluster1.local:5000"
-)
-
 type CN2 struct {
-	Client *k8s.Client
+	Client   *k8s.Client
+	registry string
 }
 
-func New() (*CN2, error) {
-	client, err := k8s.NewClient()
+func New(registry, kubeconfig string) (*CN2, error) {
+	client, err := k8s.NewClient(kubeconfig)
 	if err != nil {
 		return nil, err
 	}
 	return &CN2{
-		Client: client,
+		Client:   client,
+		registry: registry,
 	}, nil
 }
 
@@ -65,6 +65,20 @@ func (c *CN2) GetClusterDomain(name string) (string, error) {
 		return "", fmt.Errorf("cluster name empty")
 	}
 	return fmt.Sprintf("svc.%s", cc.ClusterName), nil
+}
+
+func (c *CN2) checkCreateNamespace(name string) error {
+	ns := &v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+	if _, err := c.Client.K8S.CoreV1().Namespaces().Create(context.Background(), ns, metav1.CreateOptions{}); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *CN2) CreateVN(name, subnet string) error {
@@ -163,7 +177,65 @@ func (c *CN2) DeleteVN(name string) error {
 	return nil
 }
 
-func (c *CN2) CreateDNSLB(name, domain string) error {
+func (c *CN2) CreateDNSLB(name, domain string, modifyHosts bool) error {
+	if err := c.checkCreateNamespace(name); err != nil {
+		return err
+	}
+	coreDNSCM, err := c.Client.K8S.CoreV1().ConfigMaps("kube-system").Get(context.Background(), "coredns", metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	coreDNSConfig, ok := coreDNSCM.Data["Corefile"]
+	if !ok {
+		return fmt.Errorf("core dns config not found")
+	}
+	var lines []string
+	r := strings.NewReader(coreDNSConfig)
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	var lineIdx *int
+	for idx, line := range lines {
+		r, _ := regexp.Compile(`kubernetes (.*) in-addr.arpa ip6.arpa`)
+		found := r.FindStringSubmatch(line)
+		if len(found) > 0 {
+			lineIdx = &idx
+			break
+		}
+	}
+	rewriteLine := fmt.Sprintf(`    rewrite name regex (.*)\.apps.%s.%s ingress.%s.%s`, name, domain, name, domain)
+
+	alreadyExists := false
+	for _, line := range lines {
+		r, _ := regexp.Compile(rewriteLine)
+		found := r.FindString(line)
+		if found != "" {
+			alreadyExists = true
+			break
+		}
+	}
+	var newConfig string
+	if !alreadyExists {
+		for idx, line := range lines {
+			if idx == *lineIdx {
+				newConfig = fmt.Sprintf("%s\n%s", newConfig, rewriteLine)
+			}
+			if idx == 0 {
+				newConfig = line
+			} else {
+				newConfig = fmt.Sprintf("%s\n%s", newConfig, line)
+			}
+		}
+		coreDNSCM.Data["Corefile"] = newConfig
+		if _, err := c.Client.K8S.CoreV1().ConfigMaps("kube-system").Update(context.Background(), coreDNSCM, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
+	}
+
 	apiSvc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "api",
@@ -214,9 +286,11 @@ func (c *CN2) CreateDNSLB(name, domain string) error {
 			if err := hosts.SaveAs(f.Name()); err != nil {
 				return err
 			}
-			stderr, err := RunSudo(fmt.Sprintf("cp %s /etc/hosts", f.Name()), "")
-			if err != nil {
-				return fmt.Errorf(stderr.String())
+			if modifyHosts {
+				stderr, err := RunSudo(fmt.Sprintf("cp %s /etc/hosts", f.Name()), "")
+				if err != nil {
+					return fmt.Errorf(stderr.String())
+				}
 			}
 			break
 		}
@@ -287,6 +361,10 @@ func (c *CN2) CreateDNSLB(name, domain string) error {
 }
 
 func (c *CN2) DeleteDNSLB(name string) error {
+	domain, err := c.GetClusterDomain(name)
+	if err != nil {
+		return err
+	}
 	if err := c.Client.K8S.CoreV1().Services(name).Delete(context.Background(), "api", metav1.DeleteOptions{}); err != nil {
 		if !errors.IsNotFound(err) {
 			return err
@@ -302,10 +380,58 @@ func (c *CN2) DeleteDNSLB(name string) error {
 			return err
 		}
 	}
+
+	coreDNSCM, err := c.Client.K8S.CoreV1().ConfigMaps("kube-system").Get(context.Background(), "coredns", metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	coreDNSConfig, ok := coreDNSCM.Data["Corefile"]
+	if !ok {
+		return fmt.Errorf("core dns config not found")
+	}
+	var lines []string
+	r := strings.NewReader(coreDNSConfig)
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	rewriteLine := fmt.Sprintf(`    rewrite name regex (.*)\.apps.%s.%s ingress.%s.%s`, name, domain, name, domain)
+
+	var lineIdx *int
+	for idx, line := range lines {
+		r, _ := regexp.Compile(rewriteLine)
+		found := r.FindString(line)
+		if found != "" {
+			lineIdx = &idx
+			break
+		}
+	}
+	var newConfig string
+	if lineIdx != nil {
+		for idx, line := range lines {
+			if idx == *lineIdx {
+				continue
+			}
+			if idx == 0 {
+				newConfig = line
+			} else {
+				newConfig = fmt.Sprintf("%s\n%s", newConfig, line)
+			}
+		}
+		coreDNSCM.Data["Corefile"] = newConfig
+		if _, err := c.Client.K8S.CoreV1().ConfigMaps("kube-system").Update(context.Background(), coreDNSCM, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func defineVM(name, clustername, role, nameserver, domainName string) *kubevirtV1.VirtualMachine {
+func defineVM(name, clustername, role, nameserver, domainName, registry, memory string, vcpu uint32, dedicatedCPUPlacement bool) *kubevirtV1.VirtualMachine {
 	var firstBootOrder uint = 1
 	var secondBootOrder uint = 2
 	running := true
@@ -347,14 +473,14 @@ func defineVM(name, clustername, role, nameserver, domainName string) *kubevirtV
 					}},
 					Domain: kubevirtV1.DomainSpec{
 						CPU: &kubevirtV1.CPU{
-							Sockets:               12,
+							Sockets:               vcpu,
 							Threads:               1,
 							Cores:                 1,
-							DedicatedCPUPlacement: true,
+							DedicatedCPUPlacement: dedicatedCPUPlacement,
 						},
 						Resources: kubevirtV1.ResourceRequirements{
 							Requests: v1.ResourceList{
-								"memory": resource.MustParse("32Gi"),
+								"memory": resource.MustParse(memory),
 							},
 						},
 						Devices: kubevirtV1.Devices{
@@ -401,7 +527,7 @@ func defineVM(name, clustername, role, nameserver, domainName string) *kubevirtV
 						Name: fmt.Sprintf("%s-iso", name),
 						VolumeSource: kubevirtV1.VolumeSource{
 							ContainerDisk: &kubevirtV1.ContainerDiskSource{
-								Image:           fmt.Sprintf("%s/%s", REGISTRY, name),
+								Image:           fmt.Sprintf("%s/%s", registry, name),
 								ImagePullPolicy: v1.PullAlways,
 							},
 						},
@@ -436,14 +562,17 @@ func defineVM(name, clustername, role, nameserver, domainName string) *kubevirtV
 	return vm
 }
 
-func (c *CN2) CreateVMS(name, domainName string, controller int, worker int) error {
+func (c *CN2) CreateVMS(name, domainName string, controller int, worker int, memory string, vcpu uint32, dedicatedCPUPlacement bool) error {
+	if err := c.checkCreateNamespace(name); err != nil {
+		return err
+	}
 	dnsSvc, err := c.Client.K8S.CoreV1().Services("kube-system").Get(context.Background(), "coredns", metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", name, i)
-		vm := defineVM(nodename, name, "controller", dnsSvc.Spec.ClusterIP, domainName)
+		vm := defineVM(nodename, name, "controller", dnsSvc.Spec.ClusterIP, domainName, c.registry, memory, vcpu, dedicatedCPUPlacement)
 		if _, err := c.Client.Kubevirt.VirtualMachine(name).Create(vm); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err
@@ -452,7 +581,7 @@ func (c *CN2) CreateVMS(name, domainName string, controller int, worker int) err
 	}
 	for i := 0; i < worker; i++ {
 		nodename := fmt.Sprintf("%s-worker-%d", name, i)
-		vm := defineVM(nodename, name, "worker", dnsSvc.Spec.ClusterIP, domainName)
+		vm := defineVM(nodename, name, "worker", dnsSvc.Spec.ClusterIP, domainName, c.registry, memory, vcpu, dedicatedCPUPlacement)
 		if _, err := c.Client.Kubevirt.VirtualMachine(name).Create(vm); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err
@@ -481,7 +610,7 @@ func (c *CN2) CreateStorage(image infrastructure.Image, controller int, worker i
 
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", image.Name, i)
-		ci, err := containerImage.NewContainerImage(nodename, REGISTRY, filepath.Dir(image.Path))
+		ci, err := containerImage.NewContainerImage(nodename, c.registry, filepath.Dir(image.Path))
 		if err != nil {
 			return err
 		}
@@ -498,7 +627,7 @@ func (c *CN2) CreateStorage(image infrastructure.Image, controller int, worker i
 	}
 	for i := 0; i < worker; i++ {
 		nodename := fmt.Sprintf("%s-worker-%d", image.Name, i)
-		ci, err := containerImage.NewContainerImage(nodename, REGISTRY, filepath.Dir(image.Path))
+		ci, err := containerImage.NewContainerImage(nodename, c.registry, filepath.Dir(image.Path))
 		if err != nil {
 			return err
 		}

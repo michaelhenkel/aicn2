@@ -6,12 +6,14 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/fs"
+	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/GehirnInc/crypt/sha512_crypt"
 	"github.com/machinebox/progress"
 	"github.com/openshift/assisted-service/client/installer"
 	aiManifests "github.com/openshift/assisted-service/client/manifests"
@@ -27,11 +29,17 @@ import (
 )
 
 var (
-	file       string
-	skipiso    bool
-	worker     int
-	controller int
-	nocontrail bool
+	file                  string
+	skipiso               bool
+	skipstorage           bool
+	worker                int
+	controller            int
+	nocontrail            bool
+	registry              string
+	memory                string
+	vcpu                  uint32
+	dedicatedCpuPlacement bool
+	modifyHosts           bool
 )
 
 func init() {
@@ -39,7 +47,13 @@ func init() {
 	create.PersistentFlags().IntVarP(&worker, "worker", "w", 0, "worker count")
 	create.PersistentFlags().IntVarP(&controller, "controller", "c", 1, "controller count")
 	create.PersistentFlags().BoolVar(&skipiso, "skipiso", false, "don't create iso")
+	create.PersistentFlags().BoolVar(&skipstorage, "skipstorage", false, "don't push containers")
 	create.PersistentFlags().BoolVar(&nocontrail, "nocontrail", false, "don't install contrail")
+	create.PersistentFlags().StringVarP(&registry, "registry", "r", "registry.default.svc.cluster1.local:5000", "container registry for ISO")
+	create.PersistentFlags().StringVarP(&memory, "memory", "m", "16Gi", "VM Memory")
+	create.PersistentFlags().Uint32VarP(&vcpu, "vcpu", "v", 8, "VM VCPU")
+	create.PersistentFlags().BoolVarP(&dedicatedCpuPlacement, "dedicatedCpuPlacement", "d", false, "enable dedicated CPU placement")
+	create.PersistentFlags().BoolVarP(&modifyHosts, "modifyhosts", "e", false, "add entry to /etc/hosts (sudo required)")
 }
 
 type InstallConfig struct {
@@ -81,7 +95,7 @@ var create = &cobra.Command{
 			klog.Fatal("--file or name has to be specified")
 		}
 		var infraInterface infrastructure.InfrastructureInterface
-		c, err := cn2.New()
+		c, err := cn2.New(registry, kubeconfigPath)
 		if err != nil {
 			klog.Fatal(err)
 		}
@@ -197,8 +211,14 @@ done`
 	},
 	"kernelArguments": {
 		"shouldExist":["ipv6.disable=1"]
+	},
+	"passwd": {
+		"users": [{
+			"name": "core",
+			"passwordHash": "%s"
+		}]
 	}
-}`, encodedScript)
+}`, encodedScript, encryptPassword("contrail123"))
 			klog.Info("Setting Discovery Kernel Arg and CA Patch Service")
 			if _, err := client.Installer.UpdateDiscoveryIgnition(context.Background(), &installer.UpdateDiscoveryIgnitionParams{
 				ClusterID: *cluster.ID,
@@ -208,23 +228,23 @@ done`
 			}); err != nil {
 				klog.Fatalf("%+v\n", err)
 			}
-			klog.Info("Generating ISO")
-			if _, err := client.Installer.GenerateClusterISO(context.Background(), &installer.GenerateClusterISOParams{
-				ClusterID: *cluster.ID,
-				ImageCreateParams: &models.ImageCreateParams{
-					ImageType:    models.ImageTypeFullIso,
-					SSHPublicKey: strings.Trim(createCluster.SSHPublicKey, "\n"),
-				},
-			}); err != nil {
-				klog.Fatal(err)
-			}
-			if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s", homedir, *createCluster.Name)); os.IsNotExist(err) {
-				if err := os.Mkdir(fmt.Sprintf("%s/.aicn2/%s", homedir, *createCluster.Name), 0755); err != nil {
-					klog.Fatal(err)
-				}
-			}
 
 			if !skipiso {
+				klog.Info("Generating ISO")
+				if _, err := client.Installer.GenerateClusterISO(context.Background(), &installer.GenerateClusterISOParams{
+					ClusterID: *cluster.ID,
+					ImageCreateParams: &models.ImageCreateParams{
+						ImageType:    models.ImageTypeFullIso,
+						SSHPublicKey: strings.Trim(createCluster.SSHPublicKey, "\n"),
+					},
+				}); err != nil {
+					klog.Fatal(err)
+				}
+				if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s", homedir, *createCluster.Name)); os.IsNotExist(err) {
+					if err := os.Mkdir(fmt.Sprintf("%s/.aicn2/%s", homedir, *createCluster.Name), 0755); err != nil {
+						klog.Fatal(err)
+					}
+				}
 				klog.Info("Downloading ISO")
 				attempt := 1
 				success := false
@@ -297,25 +317,28 @@ done`
 				}
 			}
 		}
-
-		klog.Info("Preparing Storage")
-		if err := infraInterface.CreateStorage(infrastructure.Image{
-			Name: cluster.Name,
-			Path: fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, cluster.Name),
-		}, controller, worker); err != nil {
-			klog.Fatal(err)
+		if !skipstorage {
+			klog.Info("Preparing Storage")
+			if err := infraInterface.CreateStorage(infrastructure.Image{
+				Name: cluster.Name,
+				Path: fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, cluster.Name),
+			}, controller, worker); err != nil {
+				klog.Fatal(err)
+			}
 		}
-		klog.Info("Creating VN")
-		if err := infraInterface.CreateVN(cluster.Name, cluster.MachineNetworkCidr); err != nil {
-			klog.Fatal(err)
-		}
+		/*
+			klog.Info("Creating VN")
+			if err := infraInterface.CreateVN(cluster.Name, cluster.MachineNetworkCidr); err != nil {
+				klog.Fatal(err)
+			}
+		*/
 
 		klog.Info("Creating VMs")
-		if err := infraInterface.CreateVMS(cluster.Name, clusterDomain, controller, worker); err != nil {
+		if err := infraInterface.CreateVMS(cluster.Name, clusterDomain, controller, worker, memory, vcpu, dedicatedCpuPlacement); err != nil {
 			klog.Fatal(err)
 		}
 		klog.Info("Creating DNS and LB")
-		if err := infraInterface.CreateDNSLB(cluster.Name, clusterDomain); err != nil {
+		if err := infraInterface.CreateDNSLB(cluster.Name, clusterDomain, modifyHosts); err != nil {
 			klog.Fatal(err)
 		}
 		if !nocontrail {
@@ -481,6 +504,25 @@ done`
 				}
 		*/
 	},
+}
+
+func encryptPassword(userPassword string) string {
+	// Generate a random string for use in the salt
+	const charset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	s := make([]byte, 8)
+	for i := range s {
+		s[i] = charset[seededRand.Intn(len(charset))]
+	}
+	salt := []byte(fmt.Sprintf("$6$%s", s))
+	// use salt to hash user-supplied password
+	c := sha512_crypt.New()
+	hash, err := c.Generate([]byte(userPassword), salt)
+	if err != nil {
+		fmt.Printf("error hashing user's supplied password: %s\n", err)
+		os.Exit(1)
+	}
+	return string(hash)
 }
 
 func remoteRun(user string, addr string, privateKey string, cmd string) (string, error) {

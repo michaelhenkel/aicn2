@@ -21,8 +21,9 @@ const (
 )
 
 var (
-	offlineToken string
-	token        string
+	offlineToken   string
+	token          string
+	kubeconfigPath string
 )
 
 var rootCmd = &cobra.Command{
@@ -39,6 +40,7 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&offlineToken, "offlinetoken", "", "access token file")
+	rootCmd.PersistentFlags().StringVarP(&kubeconfigPath, "kubeconfig", "k", "", "path to kubeconfig")
 	rootCmd.AddCommand(create)
 	rootCmd.AddCommand(delete)
 	rootCmd.AddCommand(get)
