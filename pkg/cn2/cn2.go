@@ -434,6 +434,7 @@ func (c *CN2) DeleteDNSLB(name string) error {
 func defineVM(name, clustername, role, nameserver, domainName, registry, memory string, vcpu uint32, dedicatedCPUPlacement bool) *kubevirtV1.VirtualMachine {
 	var firstBootOrder uint = 1
 	var secondBootOrder uint = 2
+	//etcResolvEntry := fmt.Sprintf(`"nameserver %s"`, nameserver)
 	running := true
 	vm := &kubevirtV1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -456,6 +457,17 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 						Nameservers: []string{nameserver},
 						Searches:    []string{fmt.Sprintf("%s.%s", clustername, domainName)},
 					},
+					/*
+						LivenessProbe: &kubevirtV1.Probe{
+							Handler: kubevirtV1.Handler{
+								Exec: &v1.ExecAction{
+									Command: []string{"grep", nameserver, "/etc/resolv.conf"},
+								},
+							},
+							InitialDelaySeconds: 100,
+							FailureThreshold:    10,
+						},
+					*/
 					Networks: []kubevirtV1.Network{{
 						/*
 								Name: clustername,

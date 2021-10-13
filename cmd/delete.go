@@ -9,7 +9,6 @@ import (
 	"github.com/michaelhenkel/aicn2/pkg/infrastructure"
 	"github.com/michaelhenkel/aicn2/pkg/utils"
 	"github.com/openshift/assisted-service/client/installer"
-	"github.com/openshift/assisted-service/models"
 	"github.com/spf13/cobra"
 	"k8s.io/klog"
 )
@@ -35,21 +34,21 @@ var delete = &cobra.Command{
 		if err != nil {
 			klog.Fatal(err)
 		}
-
-		var cluster *models.Cluster
 		for _, cl := range clusterList.GetPayload() {
 			if cl.Name == args[0] {
-				cluster = cl
-				if _, err := client.Installer.DeregisterCluster(context.Background(), &installer.DeregisterClusterParams{
-					ClusterID: *cluster.ID,
-				}); err != nil {
-					klog.Error(err)
-				}
+
 				if _, err := client.Installer.ResetCluster(context.Background(), &installer.ResetClusterParams{
 					ClusterID: *cl.ID,
 				}); err != nil {
 					klog.Error(err)
 				}
+
+				if _, err := client.Installer.DeregisterCluster(context.Background(), &installer.DeregisterClusterParams{
+					ClusterID: *cl.ID,
+				}); err != nil {
+					klog.Error(err)
+				}
+
 				header := map[string]string{
 					"accept":        "application/json",
 					"Authorization": fmt.Sprintf("Bearer %s", token),

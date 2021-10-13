@@ -7,7 +7,7 @@ spec:
   common:
     replicas: 1
     containers:
-    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-control:latest
+    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-control:reset
       name: contrail-control
     - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-telemetry-exporter:latest
       name: contrail-control-telemetry-exporter
