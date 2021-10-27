@@ -482,6 +482,13 @@ done`
 			}
 			status := currentCluster.GetPayload().Status
 			if *status == "ready" {
+				klog.Info("Cluster Ready, starting Installation")
+				_, err = client.Installer.InstallCluster(context.Background(), &installer.InstallClusterParams{
+					ClusterID: *cluster.ID,
+				})
+				if err != nil {
+					klog.Fatal(err)
+				}
 				break
 			}
 			time.Sleep(time.Second * 3)

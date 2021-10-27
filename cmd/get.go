@@ -24,13 +24,17 @@ var get = &cobra.Command{
 		if err != nil {
 			klog.Fatal(err)
 		}
-		clusterList, err := client.Installer.ListClusters(context.Background(), &installer.ListClustersParams{})
+		unregisteredClusters := false
+		clusterList, err := client.Installer.ListClusters(context.Background(), &installer.ListClustersParams{
+			GetUnregisteredClusters: &unregisteredClusters,
+		})
 		if err != nil {
 			klog.Fatal(err)
 		}
 
 		var cluster *models.Cluster
 		for _, cl := range clusterList.GetPayload() {
+			klog.Info(cl.Name)
 			if cl.Name == args[0] {
 				cluster = cl
 			}
