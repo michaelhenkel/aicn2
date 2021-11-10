@@ -1914,6 +1914,9 @@ spec:
               configDBUseSsl:
                 description: Use SSL for K8s/Cassandra connection
                 type: boolean
+              dataControlInterface:
+                description: Interface for xmpp/bgp traffic
+                type: string
               defaultNamespace:
                 description: Default namespace used to configure BGPRouter
                 type: string
@@ -2067,6 +2070,11 @@ spec:
               kind:
                 description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
                 type: string
+              listenAddress:
+                additionalProperties:
+                  type: string
+                description: ListenAddress is a map of control nodes and the ip they listen on
+                type: object
               metadata:
                 type: object
               phase:

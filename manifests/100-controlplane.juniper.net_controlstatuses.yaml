@@ -62,6 +62,11 @@ spec:
           kind:
             description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
             type: string
+          listenAddress:
+            additionalProperties:
+              type: string
+            description: ListenAddress is a map of control nodes and the ip they listen on
+            type: object
           metadata:
             type: object
           phase:

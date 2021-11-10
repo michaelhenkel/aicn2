@@ -326,12 +326,11 @@ done`
 				klog.Fatal(err)
 			}
 		}
-		/*
-			klog.Info("Creating VN")
-			if err := infraInterface.CreateVN(cluster.Name, cluster.MachineNetworkCidr); err != nil {
-				klog.Fatal(err)
-			}
-		*/
+
+		klog.Info("Creating VN")
+		if err := infraInterface.CreateVN(cluster.Name, "10.0.0.0/24"); err != nil {
+			klog.Fatal(err)
+		}
 
 		klog.Info("Creating VMs")
 		if err := infraInterface.CreateVMS(cluster.Name, clusterDomain, controller, worker, memory, vcpu, dedicatedCpuPlacement); err != nil {
@@ -339,6 +338,20 @@ done`
 		}
 		klog.Info("Creating DNS and LB")
 		if err := infraInterface.CreateDNSLB(cluster.Name, clusterDomain, modifyHosts); err != nil {
+			klog.Fatal(err)
+		}
+		klog.Info("Creating API VIP")
+		apiVIP, err := infraInterface.AllocateAPIVip(cluster.Name, "api")
+		if err != nil {
+			klog.Fatal(err)
+		}
+		klog.Info("Creating Ingress VIP")
+		ingressVIP, err := infraInterface.AllocateAPIVip(cluster.Name, "ingress")
+		if err != nil {
+			klog.Fatal(err)
+		}
+		klog.Info("Associating API VIP with VMs")
+		if err := infraInterface.AssociateAPIVip(cluster.Name, apiVIP); err != nil {
 			klog.Fatal(err)
 		}
 		if !nocontrail {
@@ -458,10 +471,14 @@ done`
 				}
 				if len(hostRoles) == worker+controller {
 					klog.Info("Updating Host Roles")
+					usermanagedNetwork := false
 					if _, err := client.Installer.UpdateCluster(context.Background(), &installer.UpdateClusterParams{
 						ClusterID: *cluster.ID,
 						ClusterUpdateParams: &models.ClusterUpdateParams{
-							HostsRoles: hostRoles,
+							HostsRoles:            hostRoles,
+							APIVip:                &apiVIP,
+							IngressVip:            &ingressVIP,
+							UserManagedNetworking: &usermanagedNetwork,
 						},
 					}); err != nil {
 						klog.Fatal(err)

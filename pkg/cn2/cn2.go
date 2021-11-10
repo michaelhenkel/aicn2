@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog"
 	kubevirtV1 "kubevirt.io/client-go/api/v1"
+	corev1alpha1 "ssd-git.juniper.net/contrail/cn2/contrail/pkg/apis/core/v1alpha1"
 )
 
 type CN2 struct {
@@ -82,6 +84,9 @@ func (c *CN2) checkCreateNamespace(name string) error {
 }
 
 func (c *CN2) CreateVN(name, subnet string) error {
+	if err := c.checkCreateNamespace(name); err != nil {
+		return err
+	}
 	/*
 		sn := &corev1alpha1.Subnet{
 			ObjectMeta: metav1.ObjectMeta{
@@ -174,6 +179,91 @@ func (c *CN2) CreateVN(name, subnet string) error {
 }
 
 func (c *CN2) DeleteVN(name string) error {
+	return nil
+}
+
+func (c *CN2) AssociateAPIVip(name, ip string) error {
+	// Labels:    map[string]string{"occluster": clustername, "role": role},
+	podList, err := c.Client.K8S.CoreV1().Pods(name).List(context.Background(), metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("occluster=%s,role=controller", name),
+	})
+	if err != nil {
+		return err
+	}
+	vmiList, err := c.Client.Contrail.CoreV1alpha1().VirtualMachineInterfaces(name).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, pod := range podList.Items {
+		for _, vmi := range vmiList.Items {
+			if vmi.Annotations["kube-manager.juniper.net/pod-name"] == pod.Name && vmi.Annotations["kube-manager.juniper.net/pod-namespace"] == pod.Namespace {
+				vmi.Spec.AllowedAddressPairs = corev1alpha1.AllowedAddressPairs{
+					AllowedAddressPair: []corev1alpha1.AllowedAddressPair{{
+						IPAddress: corev1alpha1.AllowedAddressPairSubnet{
+							IPPrefix:       corev1alpha1.IPAddress(ip),
+							IPPrefixLength: intstr.FromInt(32),
+						},
+						AddressMode: corev1alpha1.ActiveStandby,
+					}},
+				}
+				if _, err := c.Client.Contrail.CoreV1alpha1().VirtualMachineInterfaces(name).Update(context.Background(), &vmi, metav1.UpdateOptions{}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (c *CN2) AllocateAPIVip(name, role string) (string, error) {
+	iip := &corev1alpha1.InstanceIP{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("%s-%s-vip", name, role),
+			Labels: map[string]string{
+				"occluster": name,
+			},
+		},
+		Spec: corev1alpha1.InstanceIPSpec{
+			IPFamily: corev1alpha1.IPFamilyV4,
+			VirtualNetworkReference: &corev1alpha1.ResourceReference{
+				ObjectReference: v1.ObjectReference{
+					Name:       "default-podnetwork",
+					Namespace:  "contrail-k8s-kubemanager-cluster1-local-contrail",
+					Kind:       "VirtualNetwork",
+					APIVersion: "core.contrail.juniper.net/v1alpha1",
+				},
+			},
+		},
+	}
+	_, err := c.Client.Contrail.CoreV1alpha1().InstanceIPs().Create(context.Background(), iip, metav1.CreateOptions{})
+	if err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return "", err
+		}
+	}
+
+	for i := 0; i < 5; i++ {
+		iip, err = c.Client.Contrail.CoreV1alpha1().InstanceIPs().Get(context.Background(), fmt.Sprintf("%s-%s-vip", name, role), metav1.GetOptions{})
+		if err != nil {
+			return "", err
+		}
+		ip := iip.Spec.IPAddress.IP().String()
+		if _, _, err := net.ParseCIDR(ip + "/32"); err != nil {
+			time.Sleep(time.Second * 2)
+		} else {
+			return iip.Spec.IPAddress.IP().String(), nil
+		}
+	}
+
+	return "", fmt.Errorf("no valid IP")
+}
+
+func (c *CN2) DeleteAPIVip(name, role string) error {
+	if err := c.Client.Contrail.CoreV1alpha1().InstanceIPs().Delete(context.Background(), fmt.Sprintf("%s-%s-vip", name, role), metav1.DeleteOptions{}); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -469,18 +559,16 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 						},
 					*/
 					Networks: []kubevirtV1.Network{{
-						/*
-								Name: clustername,
-								NetworkSource: kubevirtV1.NetworkSource{
-									Multus: &kubevirtV1.MultusNetwork{
-										NetworkName: fmt.Sprintf("%s/%s", clustername, clustername),
-									},
-								},
-							}, {
-						*/
 						Name: "default",
 						NetworkSource: kubevirtV1.NetworkSource{
 							Pod: &kubevirtV1.PodNetwork{},
+						},
+					}, {
+						Name: clustername,
+						NetworkSource: kubevirtV1.NetworkSource{
+							Multus: &kubevirtV1.MultusNetwork{
+								NetworkName: fmt.Sprintf("%s/%s", clustername, clustername),
+							},
 						},
 					}},
 					Domain: kubevirtV1.DomainSpec{
@@ -501,13 +589,11 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 								InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
 									Bridge: &kubevirtV1.InterfaceBridge{},
 								},
-								/*
-									}, {
-										Name: clustername,
-										InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
-											Bridge: &kubevirtV1.InterfaceBridge{},
-										},
-								*/
+							}, {
+								Name: clustername,
+								InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
+									Bridge: &kubevirtV1.InterfaceBridge{},
+								},
 							}},
 							Disks: []kubevirtV1.Disk{{
 								Name: fmt.Sprintf("%s-iso", name),
@@ -551,9 +637,23 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 
 	if role == "controller" {
 		vm.Spec.Template.Spec.ReadinessProbe = &kubevirtV1.Probe{
+			InitialDelaySeconds: 10,
+			PeriodSeconds:       10,
+			SuccessThreshold:    1,
+			TimeoutSeconds:      10,
+			FailureThreshold:    3,
 			Handler: kubevirtV1.Handler{
-				TCPSocket: &v1.TCPSocketAction{
-					Port: intstr.FromInt(6443),
+				/*
+					TCPSocket: &v1.TCPSocketAction{
+						Port: intstr.FromInt(6443),
+					},
+				*/
+				HTTPGet: &v1.HTTPGetAction{
+					Path: "readyz",
+					Port: intstr.IntOrString{
+						IntVal: 6443,
+					},
+					Scheme: v1.URISchemeHTTPS,
 				},
 			},
 		}

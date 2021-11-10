@@ -63,7 +63,7 @@ func NewCreateCluster(clusterConfig []byte, clusterDomain string, ha bool) (*mod
 	if err := json.Unmarshal(clusterConfig, cluster); err != nil {
 		return nil, err
 	}
-	userManagedNetworking := true
+	userManagedNetworking := false
 	cluster.UserManagedNetworking = &userManagedNetworking
 	vipDhcpAllocation := false
 	cluster.VipDhcpAllocation = &vipDhcpAllocation

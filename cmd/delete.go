@@ -74,6 +74,12 @@ var delete = &cobra.Command{
 		if err := infraInterface.DeleteVN(args[0]); err != nil {
 			klog.Fatal(err)
 		}
+		if err := infraInterface.DeleteAPIVip(args[0], "api"); err != nil {
+			klog.Fatal(err)
+		}
+		if err := infraInterface.DeleteAPIVip(args[0], "ingress"); err != nil {
+			klog.Fatal(err)
+		}
 		/*
 			homedir, err := os.UserHomeDir()
 			if err != nil {
