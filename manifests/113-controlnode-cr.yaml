@@ -6,7 +6,7 @@ metadata:
 spec:
   dataControlInterface: "enp2s0"
   common:
-    replicas: 1
+    #replicas: 1
     containers:
     - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-control:latest
       name: contrail-control
