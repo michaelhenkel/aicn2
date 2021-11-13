@@ -2000,6 +2000,9 @@ spec:
               serviceV6Subnet:
                 description: IPV6 pod subnet used to create the default service VirtualNetwork
                 type: string
+              splitNetworkIngressVIP:
+                description: Indicates if kubernetes fabric network and contrail data/ctrl network are separate
+                type: string
             type: object
           status:
             properties:

@@ -8,12 +8,12 @@ spec:
   common:
     replicas: 1
     containers:
-    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-control:ocp
+    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-control:latest
       name: contrail-control
     - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-telemetry-exporter:latest
       name: contrail-control-telemetry-exporter
     initContainers:
-    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-init:enable_second_interface
+    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-init:mhenkel_CN2-3779
       name: contrail-init
     nodeSelector:
       node-role.kubernetes.io/master: ""

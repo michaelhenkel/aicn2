@@ -7,17 +7,17 @@ spec:
   agent:
     virtualHostInterface:
       physicalInterface: "enp2s0"
-    gateway: "10.0.0.1"
+      gateway: 10.0.0.1
   common:
     containers:
-    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-vrouter-agent:ocp
+    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-vrouter-agent:latest
       name: contrail-vrouter-agent
-    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-init:enable_second_interface
+    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-init:mhenkel_CN2-3779
       name: contrail-watcher
     - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-telemetry-exporter:latest
       name: contrail-vrouter-telemetry-exporter
     initContainers:
-    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-init:enable_second_interface
+    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-init:mhenkel_CN2-3779
       name: contrail-init
     - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-cni-init:latest
       name: contrail-cni-init

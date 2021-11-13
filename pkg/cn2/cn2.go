@@ -182,10 +182,10 @@ func (c *CN2) DeleteVN(name string) error {
 	return nil
 }
 
-func (c *CN2) AssociateAPIVip(name, ip string) error {
+func (c *CN2) AssociateVip(name, ip, role string) error {
 	// Labels:    map[string]string{"occluster": clustername, "role": role},
 	podList, err := c.Client.K8S.CoreV1().Pods(name).List(context.Background(), metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("occluster=%s,role=controller", name),
+		LabelSelector: fmt.Sprintf("occluster=%s,role=%s", name, role),
 	})
 	if err != nil {
 		return err

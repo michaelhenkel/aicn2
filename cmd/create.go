@@ -336,10 +336,12 @@ done`
 		if err := infraInterface.CreateVMS(cluster.Name, clusterDomain, controller, worker, memory, vcpu, dedicatedCpuPlacement); err != nil {
 			klog.Fatal(err)
 		}
-		klog.Info("Creating DNS and LB")
-		if err := infraInterface.CreateDNSLB(cluster.Name, clusterDomain, modifyHosts); err != nil {
-			klog.Fatal(err)
-		}
+		/*
+			klog.Info("Creating DNS and LB")
+			if err := infraInterface.CreateDNSLB(cluster.Name, clusterDomain, modifyHosts); err != nil {
+				klog.Fatal(err)
+			}
+		*/
 		klog.Info("Creating API VIP")
 		apiVIP, err := infraInterface.AllocateAPIVip(cluster.Name, "api")
 		if err != nil {
@@ -350,8 +352,12 @@ done`
 		if err != nil {
 			klog.Fatal(err)
 		}
-		klog.Info("Associating API VIP with VMs")
-		if err := infraInterface.AssociateAPIVip(cluster.Name, apiVIP); err != nil {
+		klog.Info("Associating API VIP with controller VMs")
+		if err := infraInterface.AssociateVip(cluster.Name, apiVIP, "controller"); err != nil {
+			klog.Fatal(err)
+		}
+		klog.Info("Associating Ingress VIP with Worker VMs")
+		if err := infraInterface.AssociateVip(cluster.Name, ingressVIP, "worker"); err != nil {
 			klog.Fatal(err)
 		}
 		if !nocontrail {
@@ -421,38 +427,19 @@ done`
 			if len(hostList) == worker+controller {
 				var hostRoles []*models.ClusterUpdateParamsHostsRolesItems0
 				for _, host := range hostList {
+
 					/*
-						if _, err := client.Installer.V2UpdateHostIgnition(context.Background(), &installer.V2UpdateHostIgnitionParams{
-							HostIgnitionParams: &models.HostIgnitionParams{
-								Config: kernelIngnitionParam,
-							},
-							HostID:     *host.ID,
-							InfraEnvID: *cluster.ID,
-						}); err != nil {
-							klog.Fatal(err)
-						}
-					*/
-					if _, err := client.Installer.UpdateHostInstallerArgs(context.Background(), &installer.UpdateHostInstallerArgsParams{
-						ClusterID: *cluster.ID,
-						HostID:    *host.ID,
-						InstallerArgsParams: &models.InstallerArgsParams{
-							Args: []string{"--append-karg", "ipv6.disable=1"},
-						},
-					}); err != nil {
-						klog.Fatal(err)
-					}
-					/*
-						kernelIngnitionParam := `{"ignition":{"version":"3.1.0"},"kernelArguments":{"shouldExist":["ipv6.disable","1"]}}`
-						if _, err := client.Installer.UpdateHostIgnition(context.Background(), &installer.UpdateHostIgnitionParams{
+						if _, err := client.Installer.UpdateHostInstallerArgs(context.Background(), &installer.UpdateHostInstallerArgsParams{
 							ClusterID: *cluster.ID,
 							HostID:    *host.ID,
-							HostIgnitionParams: &models.HostIgnitionParams{
-								Config: kernelIngnitionParam,
+							InstallerArgsParams: &models.InstallerArgsParams{
+								Args: []string{"--append-karg", "ipv6.disable=1"},
 							},
 						}); err != nil {
 							klog.Fatal(err)
 						}
 					*/
+
 					hostnameList := strings.Split(host.RequestedHostname, "-")
 					if len(hostnameList) == 3 {
 						if hostnameList[1] == "worker" {

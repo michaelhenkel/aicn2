@@ -4,6 +4,7 @@ metadata:
   name: contrail-k8s-kubemanager
   namespace: contrail
 spec:
+  splitNetworkIngressVIP: 10.233.64.3
   common:
     containers:
     - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-kubemanager:latest
