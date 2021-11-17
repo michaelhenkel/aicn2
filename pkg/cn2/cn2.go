@@ -159,7 +159,8 @@ func (c *CN2) CreateVN(name, subnet string) error {
 					Name:      name,
 					Namespace: name,
 					Annotations: map[string]string{
-						"juniper.net/networks": fmt.Sprintf(`{"ipamV4Subnet": "%s","fabricSNAT": true}`, subnet),
+						//"juniper.net/networks": fmt.Sprintf(`{"ipamV4Subnet": "%s","fabricSNAT": true}`, subnet),
+						"juniper.net/networks": fmt.Sprintf(`{"ipamV4Subnet": "%s"}`, subnet),
 					},
 				},
 				Spec: nadv1.NetworkAttachmentDefinitionSpec{
@@ -197,17 +198,19 @@ func (c *CN2) AssociateVip(name, ip, role string) error {
 	for _, pod := range podList.Items {
 		for _, vmi := range vmiList.Items {
 			if vmi.Annotations["kube-manager.juniper.net/pod-name"] == pod.Name && vmi.Annotations["kube-manager.juniper.net/pod-namespace"] == pod.Namespace {
-				vmi.Spec.AllowedAddressPairs = corev1alpha1.AllowedAddressPairs{
-					AllowedAddressPair: []corev1alpha1.AllowedAddressPair{{
-						IPAddress: corev1alpha1.AllowedAddressPairSubnet{
-							IPPrefix:       corev1alpha1.IPAddress(ip),
-							IPPrefixLength: intstr.FromInt(32),
-						},
-						AddressMode: corev1alpha1.ActiveStandby,
-					}},
-				}
-				if _, err := c.Client.Contrail.CoreV1alpha1().VirtualMachineInterfaces(name).Update(context.Background(), &vmi, metav1.UpdateOptions{}); err != nil {
-					return err
+				if vmi.Spec.VirtualNetworkReference.Name == "default-podnetwork" {
+					vmi.Spec.AllowedAddressPairs = corev1alpha1.AllowedAddressPairs{
+						AllowedAddressPair: []corev1alpha1.AllowedAddressPair{{
+							IPAddress: corev1alpha1.AllowedAddressPairSubnet{
+								IPPrefix:       corev1alpha1.IPAddress(ip),
+								IPPrefixLength: intstr.FromInt(32),
+							},
+							AddressMode: corev1alpha1.ActiveStandby,
+						}},
+					}
+					if _, err := c.Client.Contrail.CoreV1alpha1().VirtualMachineInterfaces(name).Update(context.Background(), &vmi, metav1.UpdateOptions{}); err != nil {
+						return err
+					}
 				}
 			}
 		}
