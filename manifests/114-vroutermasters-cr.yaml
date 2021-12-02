@@ -7,9 +7,6 @@ spec:
   agent:
     default:
       httpServerPort: 18085
-    virtualHostInterface:
-      physicalInterface: "enp2s0"
-      gateway: 10.0.0.1
   common:
     containers:
     - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-vrouter-agent:latest

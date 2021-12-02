@@ -7,9 +7,6 @@ spec:
   agent:
     default:
       httpServerPort: 18085
-    virtualHostInterface:
-      physicalInterface: "enp2s0"
-      gateway: 10.0.0.1
   common:
     affinity:
       nodeAffinity:
