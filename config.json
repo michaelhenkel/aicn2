@@ -1,7 +1,7 @@
 {
   "name": "oc",
-  "openshift_version": "4.9.0",
-  "ocp_release_image": "quay.io/openshift-release-dev/ocp-release:4.9.0-x86_64",
+  "openshift_version": "4.9.4",
+  "ocp_release_image": "quay.io/openshift-release-dev/ocp-release:4.9.4-x86_64",
   "base_dns_domain": "oc.svc.cluster1.local",
   "cluster_network_cidr": "10.128.0.0/14",
   "cluster_network_host_prefix": 24,

@@ -2,28 +2,28 @@ package cmd
 
 import (
 	"fmt"
+	"net/url"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"k8s.io/klog"
-
-	api "github.com/michaelhenkel/aicn2/pkg/apis"
 )
 
 type method string
 
 const (
-	assistedServiceAPI        = "api.openshift.com"
-	POST               method = "POST"
-	GET                method = "GET"
-	DELETE             method = "DELETE"
+	POST   method = "POST"
+	GET    method = "GET"
+	DELETE method = "DELETE"
 )
 
 var (
-	offlineToken   string
-	token          string
+	assistedServiceAPI string
+	offlineToken       string
+	//token              string
 	kubeconfigPath string
+	internal       bool
+	serviceURL     *url.URL
 )
 
 var rootCmd = &cobra.Command{
@@ -40,7 +40,9 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&offlineToken, "offlinetoken", "", "access token file")
+	rootCmd.PersistentFlags().StringVar(&assistedServiceAPI, "apiurl", "http://10.87.88.2/api/assisted-install", "api url")
 	rootCmd.PersistentFlags().StringVarP(&kubeconfigPath, "kubeconfig", "k", "", "path to kubeconfig")
+	rootCmd.PersistentFlags().BoolVarP(&internal, "internal", "i", false, "path to kubeconfig")
 	rootCmd.AddCommand(create)
 	rootCmd.AddCommand(delete)
 	rootCmd.AddCommand(get)
@@ -51,23 +53,9 @@ func init() {
 }
 
 func initConfig() {
-	if offlineToken == "" {
-		offlineToken = os.Getenv("OFFLINE_TOKEN")
-		if offlineToken == "" {
-			homedir, err := os.UserHomeDir()
-			if err != nil {
-				klog.Fatal(err)
-			}
-			offlineTokenByte, err := os.ReadFile(fmt.Sprintf("%s/.aicn2/.offlinetoken", homedir))
-			if err != nil {
-				klog.Fatal(fmt.Errorf("cannot access offline token"))
-			}
-			offlineToken = strings.TrimRight(string(offlineTokenByte), "\n")
-		}
-	}
 	var err error
-	token, err = api.GetToken(offlineToken)
+	serviceURL, err = url.Parse(assistedServiceAPI)
 	if err != nil {
-		klog.Fatal("--offlinetoken must be provided or ACCESS_TOKEN env set or available in .offlinetoken ", err)
+		klog.Fatal(err)
 	}
 }

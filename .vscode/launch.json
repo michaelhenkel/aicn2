@@ -44,7 +44,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "main.go",
-            "args": ["kubeconfig","oc"]
+            "args": ["kubeconfig","ocmh"]
         },
         {
             "name": "get",

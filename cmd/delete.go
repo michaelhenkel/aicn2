@@ -2,12 +2,10 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 
 	api "github.com/michaelhenkel/aicn2/pkg/apis"
 	"github.com/michaelhenkel/aicn2/pkg/cn2"
 	"github.com/michaelhenkel/aicn2/pkg/infrastructure"
-	"github.com/michaelhenkel/aicn2/pkg/utils"
 	"github.com/openshift/assisted-service/client/installer"
 	"github.com/spf13/cobra"
 	"k8s.io/klog"
@@ -26,7 +24,7 @@ var delete = &cobra.Command{
 			klog.Fatal("name is missing")
 		}
 
-		client, err := api.NewClient(token)
+		client, err := api.NewClient(serviceURL, offlineToken)
 		if err != nil {
 			klog.Fatal(err)
 		}
@@ -48,15 +46,16 @@ var delete = &cobra.Command{
 				}); err != nil {
 					klog.Error(err)
 				}
-
-				header := map[string]string{
-					"accept":        "application/json",
-					"Authorization": fmt.Sprintf("Bearer %s", token),
-				}
-				resp, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
-				if err != nil {
-					klog.Error(resp, err)
-				}
+				/*
+					header := map[string]string{
+						"accept":        "application/json",
+						"Authorization": fmt.Sprintf("Bearer %s", token),
+					}
+					resp, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
+					if err != nil {
+						klog.Error(resp, err)
+					}
+				*/
 			}
 		}
 		var infraInterface infrastructure.InfrastructureInterface

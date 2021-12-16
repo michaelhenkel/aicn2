@@ -1890,7 +1890,7 @@ spec:
               defaultNamespace:
                 description: Default namespace
                 type: string
-              enableFouteByteAs:
+              enableFourByteAs:
                 description: Enable 4-byte autonomous system, used when creating GlobalSystemConfig
                 type: boolean
               enableSNAT:

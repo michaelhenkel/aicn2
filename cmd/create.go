@@ -104,10 +104,12 @@ var create = &cobra.Command{
 		if err != nil {
 			klog.Fatal(err)
 		}
-		client, err := api.NewClient(token)
+
+		client, err := api.NewClient(serviceURL, offlineToken)
 		if err != nil {
 			klog.Fatal(err)
 		}
+
 		clusterList, err := client.Installer.ListClusters(context.Background(), &installer.ListClustersParams{})
 		if err != nil {
 			klog.Fatal(err)

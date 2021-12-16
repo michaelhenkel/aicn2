@@ -20,7 +20,7 @@ var get = &cobra.Command{
 		if len(args) != 1 {
 			klog.Fatal("name is missing")
 		}
-		client, err := api.NewClient(token)
+		client, err := api.NewClient(serviceURL, offlineToken)
 		if err != nil {
 			klog.Fatal(err)
 		}

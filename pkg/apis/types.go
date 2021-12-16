@@ -3,11 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
+	"github.com/go-openapi/runtime"
 	rtClient "github.com/go-openapi/runtime/client"
 	"github.com/michaelhenkel/aicn2/pkg/utils"
 	"github.com/openshift/assisted-service/client"
@@ -49,10 +52,28 @@ type Token struct {
 	Scope            string `json:"scope"`
 }
 
-func NewClient(token string) (*client.AssistedInstall, error) {
-	authWriter := rtClient.BearerToken(token)
+func NewClient(serviceURL *url.URL, offlineToken string) (*client.AssistedInstall, error) {
+
+	if offlineToken != "" {
+		if _, err := os.Stat(offlineToken); err == nil {
+			offlineTokenByte, err := os.ReadFile(offlineToken)
+			if err != nil {
+				klog.Fatal(fmt.Errorf("cannot access offline token"))
+			}
+			offlineToken = strings.TrimRight(string(offlineTokenByte), "\n")
+		}
+
+	}
+
+	var authWriter runtime.ClientAuthInfoWriter
+	if offlineToken != "" {
+		authWriter = rtClient.BearerToken(offlineToken)
+	} else {
+		authWriter = rtClient.PassThroughAuth
+	}
 	aiClient := client.New(client.Config{
 		AuthInfo: authWriter,
+		URL:      serviceURL,
 	})
 
 	return aiClient, nil

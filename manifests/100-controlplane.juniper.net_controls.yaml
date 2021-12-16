@@ -1914,9 +1914,6 @@ spec:
               configDBUseSsl:
                 description: Use SSL for K8s/Cassandra connection
                 type: boolean
-              dataControlInterface:
-                description: Interface for xmpp/bgp traffic
-                type: string
               defaultNamespace:
                 description: Default namespace used to configure BGPRouter
                 type: string
