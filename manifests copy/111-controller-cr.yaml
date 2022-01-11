@@ -1,0 +1,12 @@
+apiVersion: configplane.juniper.net/v1alpha1
+kind: Controller
+metadata:
+  name: contrail-k8s-controller
+  namespace: contrail
+spec:
+  common:
+    containers:
+    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-controller:mhenkel_CN2-3779-4
+      name: contrail-k8s-controller
+    nodeSelector:
+      node-role.kubernetes.io/master: ""

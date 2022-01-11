@@ -529,6 +529,9 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 	var secondBootOrder uint = 2
 	//etcResolvEntry := fmt.Sprintf(`"nameserver %s"`, nameserver)
 	running := true
+	//dedicatedIOThread := true
+	blockMQ := true
+	//threadPolicy := kubevirtV1.IOThreadsPolicyShared
 	vm := &kubevirtV1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -575,11 +578,13 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 						},
 					}},
 					Domain: kubevirtV1.DomainSpec{
+						//IOThreadsPolicy: &threadPolicy,
 						CPU: &kubevirtV1.CPU{
 							Sockets:               vcpu,
 							Threads:               1,
 							Cores:                 1,
 							DedicatedCPUPlacement: dedicatedCPUPlacement,
+							IsolateEmulatorThread: dedicatedCPUPlacement,
 						},
 						Resources: kubevirtV1.ResourceRequirements{
 							Requests: v1.ResourceList{
@@ -587,6 +592,7 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 							},
 						},
 						Devices: kubevirtV1.Devices{
+							BlockMultiQueue: &blockMQ,
 							Interfaces: []kubevirtV1.Interface{{
 								Name: "default",
 								InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
@@ -613,6 +619,7 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 										Bus: "virtio",
 									},
 								},
+								//DedicatedIOThread: &dedicatedIOThread,
 								BootOrder: &firstBootOrder,
 							}},
 						},
