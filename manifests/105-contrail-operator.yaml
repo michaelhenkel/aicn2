@@ -18,7 +18,7 @@ spec:
         - sh
         - -c
         - /manager --metrics-addr 127.0.0.1:8081
-        image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-deployer:master-latest
+        image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-deployer:latest
         name: contrail-k8s-deployer
       hostNetwork: true
       nodeSelector:

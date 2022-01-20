@@ -6,7 +6,7 @@ metadata:
 spec:
   common:
     containers:
-    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-controller:master-latest
+    - image: svl-artifactory.juniper.net/atom-docker/cn2/bazel-build/dev/contrail-k8s-controller:latest
       name: contrail-k8s-controller
     nodeSelector:
       node-role.kubernetes.io/master: ""

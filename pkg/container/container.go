@@ -50,13 +50,13 @@ ADD --chown=107:107 disk.img /disk/`
 		return err
 	}
 
-	buildCmd := fmt.Sprintf("docker build -t %s/%s -f %s %s", c.Registry, c.Name, dockerfileLocation, c.Path)
+	buildCmd := fmt.Sprintf("podman build -t %s/%s -f %s %s", c.Registry, c.Name, dockerfileLocation, c.Path)
 	stderr, err := runCmd(buildCmd)
 	if err != nil {
 		klog.Error(stderr.String(), buildCmd, err)
 		return err
 	}
-	pushCmd := fmt.Sprintf("docker push %s/%s", c.Registry, c.Name)
+	pushCmd := fmt.Sprintf("podman push %s/%s", c.Registry, c.Name)
 	stderr, err = runCmd(pushCmd)
 	if err != nil {
 		klog.Error(stderr.String(), pushCmd, err)

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"net"
@@ -524,7 +525,7 @@ func (c *CN2) DeleteDNSLB(name string) error {
 	return nil
 }
 
-func defineVM(name, clustername, role, nameserver, domainName, registry, memory string, vcpu uint32, dedicatedCPUPlacement bool) *kubevirtV1.VirtualMachine {
+func defineVM(name, clustername, role, nameserver, domainName, registry, memory string, vcpu uint32, dedicatedCPUPlacement bool, mac1 string, mac2 string) *kubevirtV1.VirtualMachine {
 	var firstBootOrder uint = 1
 	var secondBootOrder uint = 2
 	//etcResolvEntry := fmt.Sprintf(`"nameserver %s"`, nameserver)
@@ -598,11 +599,13 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 								InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
 									Bridge: &kubevirtV1.InterfaceBridge{},
 								},
+								//MacAddress: mac1,
 							}, {
 								Name: clustername,
 								InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
 									Bridge: &kubevirtV1.InterfaceBridge{},
 								},
+								//MacAddress: mac2,
 							}},
 							Disks: []kubevirtV1.Disk{{
 								Name: fmt.Sprintf("%s-iso", name),
@@ -694,7 +697,15 @@ func (c *CN2) CreateVMS(name, domainName string, controller int, worker int, mem
 	}
 	for i := 0; i < controller; i++ {
 		nodename := fmt.Sprintf("%s-controller-%d", name, i)
-		vm := defineVM(nodename, name, "controller", dnsSvc.Spec.ClusterIP, domainName, c.registry, memory, vcpu, dedicatedCPUPlacement)
+		mac1, err := genMac()
+		if err != nil {
+			return err
+		}
+		mac2, err := genMac()
+		if err != nil {
+			return err
+		}
+		vm := defineVM(nodename, name, "controller", dnsSvc.Spec.ClusterIP, domainName, c.registry, memory, vcpu, dedicatedCPUPlacement, mac1, mac2)
 		if _, err := c.Client.Kubevirt.VirtualMachine(name).Create(vm); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err
@@ -703,7 +714,15 @@ func (c *CN2) CreateVMS(name, domainName string, controller int, worker int, mem
 	}
 	for i := 0; i < worker; i++ {
 		nodename := fmt.Sprintf("%s-worker-%d", name, i)
-		vm := defineVM(nodename, name, "worker", dnsSvc.Spec.ClusterIP, domainName, c.registry, memory, vcpu, dedicatedCPUPlacement)
+		mac1, err := genMac()
+		if err != nil {
+			return err
+		}
+		mac2, err := genMac()
+		if err != nil {
+			return err
+		}
+		vm := defineVM(nodename, name, "worker", dnsSvc.Spec.ClusterIP, domainName, c.registry, memory, vcpu, dedicatedCPUPlacement, mac1, mac2)
 		if _, err := c.Client.Kubevirt.VirtualMachine(name).Create(vm); err != nil {
 			if !errors.IsAlreadyExists(err) {
 				return err
@@ -879,4 +898,15 @@ func copyFileContents(src, dst string) error {
 		return err
 	}
 	return err
+}
+
+func genMac() (string, error) {
+	buf := make([]byte, 6)
+	_, err := rand.Read(buf)
+	if err != nil {
+		return "", err
+	}
+	// Set the local bit
+	buf[0] |= 2
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]), nil
 }
