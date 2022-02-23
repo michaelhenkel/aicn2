@@ -11,8 +11,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "main.go",
-            "args": ["create","oc","-f","config.json","-w","2","-c","3","-m","32Gi","-e","-v","12","-d"]
-            //"args": ["create","oc","-f","config.json","-w","2","-c","3","-m","32Gi","-e","-v","12","-d","--skipstorage","--skipiso"]
+            "args": ["create","ocmh","--apiurl","http://10.87.88.2/api/assisted-install","-f","config.json","-w","2","-c","3","-m","32Gi","-e","-v","12"]
         },
         {
             "name": "list",
@@ -36,7 +35,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "main.go",
-            "args": ["delete","oc"]
+            "args": ["delete","ocmh"]
         },
         {
             "name": "kubeconfig",

@@ -28,36 +28,45 @@ var delete = &cobra.Command{
 		if err != nil {
 			klog.Fatal(err)
 		}
-		clusterList, err := client.Installer.ListClusters(context.Background(), &installer.ListClustersParams{})
+		infraEnvList, err := client.Installer.ListInfraEnvs(context.Background(), &installer.ListInfraEnvsParams{})
+		if err != nil {
+			klog.Fatal(err)
+		}
+		for _, infraEnv := range infraEnvList.GetPayload() {
+			if infraEnv.Name != nil && *infraEnv.Name == args[0] {
+				if _, err := client.Installer.V2DeregisterCluster(context.Background(), &installer.V2DeregisterClusterParams{
+					ClusterID: infraEnv.ClusterID,
+				}); err != nil {
+					klog.Info(err)
+				}
+				if _, err := client.Installer.DeregisterInfraEnv(context.Background(), &installer.DeregisterInfraEnvParams{
+					InfraEnvID: *infraEnv.ID}); err != nil {
+					klog.Fatal(err)
+				}
+			}
+		}
+
+		clusterList, err := client.Installer.V2ListClusters(context.Background(), &installer.V2ListClustersParams{})
 		if err != nil {
 			klog.Fatal(err)
 		}
 		for _, cl := range clusterList.GetPayload() {
 			if cl.Name == args[0] {
 
-				if _, err := client.Installer.ResetCluster(context.Background(), &installer.ResetClusterParams{
+				if _, err := client.Installer.V2ResetCluster(context.Background(), &installer.V2ResetClusterParams{
 					ClusterID: *cl.ID,
 				}); err != nil {
 					klog.Error(err)
 				}
 
-				if _, err := client.Installer.DeregisterCluster(context.Background(), &installer.DeregisterClusterParams{
+				if _, err := client.Installer.V2DeregisterCluster(context.Background(), &installer.V2DeregisterClusterParams{
 					ClusterID: *cl.ID,
 				}); err != nil {
 					klog.Error(err)
 				}
-				/*
-					header := map[string]string{
-						"accept":        "application/json",
-						"Authorization": fmt.Sprintf("Bearer %s", token),
-					}
-					resp, err := utils.HttpRequest(fmt.Sprintf("https://%s/api/assisted-install/v1/clusters/%s", assistedServiceAPI, cl.ID), "DELETE", header, nil, "")
-					if err != nil {
-						klog.Error(resp, err)
-					}
-				*/
 			}
 		}
+
 		var infraInterface infrastructure.InfrastructureInterface
 		c, err := cn2.New(registry, kubeconfigPath)
 		if err != nil {
@@ -79,18 +88,5 @@ var delete = &cobra.Command{
 		if err := infraInterface.DeleteAPIVip(args[0], "ingress"); err != nil {
 			klog.Fatal(err)
 		}
-		/*
-			homedir, err := os.UserHomeDir()
-			if err != nil {
-				klog.Fatal(err)
-			}
-
-			if err := infraInterface.DeleteStorage(infrastructure.Image{
-				Name: args[0],
-				Path: fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, args[0]),
-			}, controllerCounter, workerCounter, hostList); err != nil {
-				klog.Fatal(err)
-			}
-		*/
 	},
 }

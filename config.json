@@ -12,5 +12,5 @@
   "additional_ntp_source": "10.84.5.100",
   "hyperthreading": "all",
   "vip_dhcp_allocation": false,
-  "user_managed_networking": true
+  "user_managed_networking": false
 }

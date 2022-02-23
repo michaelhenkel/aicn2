@@ -112,8 +112,9 @@ func NewCreateCluster(clusterConfig []byte, clusterDomain string, ha bool) (*mod
 		cluster.ServiceNetworkCidr = &serviceNetworkCidr
 	}
 	if cluster.Platform == nil {
+		bms := models.PlatformTypeBaremetal
 		platform := &models.Platform{
-			Type: models.PlatformTypeBaremetal,
+			Type: &bms,
 		}
 		cluster.Platform = platform
 	}
@@ -157,5 +158,6 @@ func GetToken(offlineToken string) (string, error) {
 	if err := json.Unmarshal(body, t); err != nil {
 		return "", err
 	}
+	fmt.Println(t.AccessToken)
 	return t.AccessToken, nil
 }

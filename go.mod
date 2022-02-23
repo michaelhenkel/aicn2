@@ -6,11 +6,11 @@ require (
 	github.com/GehirnInc/crypt v0.0.0-20200316065508-bb7000b8a962
 	github.com/docker/docker v20.10.9+incompatible
 	github.com/go-openapi/runtime v0.19.31
-	github.com/go-openapi/strfmt v0.20.2 // indirect
+	github.com/go-openapi/strfmt v0.20.3 // indirect
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.1.0
 	github.com/machinebox/progress v0.2.0
 	github.com/matryer/is v1.4.0 // indirect
-	github.com/openshift/assisted-service v1.0.10-0.20210825070125-6ba8da87d788
+	github.com/openshift/assisted-service v1.0.10-0.20211109213331-ca65aa3a0e71
 	github.com/pborman/uuid v1.2.1 // indirect
 	github.com/spf13/cobra v1.2.1
 	github.com/txn2/txeh v1.3.0

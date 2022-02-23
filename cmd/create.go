@@ -5,15 +5,19 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/rand"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/GehirnInc/crypt/sha512_crypt"
+	"github.com/go-openapi/strfmt"
 	"github.com/machinebox/progress"
 	"github.com/openshift/assisted-service/client/installer"
 	aiManifests "github.com/openshift/assisted-service/client/manifests"
@@ -110,7 +114,7 @@ var create = &cobra.Command{
 			klog.Fatal(err)
 		}
 
-		clusterList, err := client.Installer.ListClusters(context.Background(), &installer.ListClustersParams{})
+		clusterList, err := client.Installer.V2ListClusters(context.Background(), &installer.V2ListClustersParams{})
 		if err != nil {
 			klog.Fatal(err)
 		}
@@ -123,10 +127,13 @@ var create = &cobra.Command{
 				cluster = cl
 			}
 		}
+
 		homedir, err := os.UserHomeDir()
 		if err != nil {
 			klog.Fatal(err)
 		}
+
+		var infraID *strfmt.UUID
 
 		if !clusterExists {
 			if file == "" {
@@ -160,15 +167,17 @@ var create = &cobra.Command{
 				}
 				createCluster.SSHPublicKey = string(sshPubKeyByte)
 			}
+
 			klog.Info("Registering Cluster")
-			resp, err := client.Installer.RegisterCluster(context.Background(), &installer.RegisterClusterParams{
+
+			resp, err := client.Installer.V2RegisterCluster(context.Background(), &installer.V2RegisterClusterParams{
 				NewClusterParams: createCluster,
 			})
 			if err != nil {
 				klog.Fatal(resp, err)
 			}
 			klog.Info("Getting Cluster")
-			clusterList, err := client.Installer.ListClusters(context.Background(), &installer.ListClustersParams{})
+			clusterList, err := client.Installer.V2ListClusters(context.Background(), &installer.V2ListClustersParams{})
 			if err != nil {
 				klog.Fatal(err)
 			}
@@ -177,7 +186,12 @@ var create = &cobra.Command{
 					cluster = cl
 				}
 			}
+
+			for _, mn := range cluster.MachineNetworks {
+				fmt.Println(mn.Cidr)
+			}
 			serviceScript := `#!/bin/bash
+nmcli con down 'Wired connection 2'
 success=0
 until [ $success -gt 1 ]; do
   tmp=$(mktemp)
@@ -202,6 +216,10 @@ done`
 			"name": "ca-patch.service",
 			"enabled": true,
 			"contents": "[Service]\nType=oneshot\nExecStart=/usr/local/bin/ca-patch.sh\n\n[Install]\nWantedBy=multi-user.target"
+	  	},{
+			"name": "disable-enp2s0.service",
+			"enabled": true,
+			"contents": "[Service]\nType=oneshot\nExecStart=/sbin/ip link set dev enp2s0 down\n\n[Install]\nWantedBy=multi-user.target"
 	  	}]
 	},
 	"storage": {
@@ -221,104 +239,96 @@ done`
 		}]
 	}
 }`, encodedScript, encryptPassword("contrail123"))
-			klog.Info("Setting Discovery Kernel Arg and CA Patch Service")
-			if _, err := client.Installer.UpdateDiscoveryIgnition(context.Background(), &installer.UpdateDiscoveryIgnitionParams{
-				ClusterID: *cluster.ID,
-				DiscoveryIgnitionParams: &models.DiscoveryIgnitionParams{
-					Config: ingitionConfig,
-				},
-			}); err != nil {
-				klog.Fatalf("%+v\n", err)
-			}
 
+			klog.Info("Registering Infra, Setting Discovery Kernel Arg and CA Patch Service and Generating ISO")
+			sshPubKeyByte, err := os.ReadFile(fmt.Sprintf("%s/.ssh/id_rsa.pub", homedir))
+			if err != nil {
+				klog.Fatal(err)
+			}
+			pubKey := string(sshPubKeyByte)
+			pubKey = strings.Trim(pubKey, "\n")
+			infra, err := client.Installer.RegisterInfraEnv(context.Background(), &installer.RegisterInfraEnvParams{
+				InfraenvCreateParams: &models.InfraEnvCreateParams{
+					Name:                   &cluster.Name,
+					ClusterID:              cluster.ID,
+					PullSecret:             &pullSecret,
+					OpenshiftVersion:       &cluster.OpenshiftVersion,
+					IgnitionConfigOverride: ingitionConfig,
+					SSHAuthorizedKey:       &pubKey,
+				},
+			})
+			if err != nil {
+				klog.Fatal(err)
+			}
+			infraID = infra.GetPayload().ID
+			fmt.Println(infra.GetPayload().DownloadURL)
 			if !skipiso {
-				klog.Info("Generating ISO")
-				if _, err := client.Installer.GenerateClusterISO(context.Background(), &installer.GenerateClusterISOParams{
-					ClusterID: *cluster.ID,
-					ImageCreateParams: &models.ImageCreateParams{
-						ImageType:    models.ImageTypeFullIso,
-						SSHPublicKey: strings.Trim(createCluster.SSHPublicKey, "\n"),
-					},
-				}); err != nil {
-					klog.Fatal(err)
-				}
 				if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s", homedir, *createCluster.Name)); os.IsNotExist(err) {
 					if err := os.Mkdir(fmt.Sprintf("%s/.aicn2/%s", homedir, *createCluster.Name), 0755); err != nil {
 						klog.Fatal(err)
 					}
 				}
 				klog.Info("Downloading ISO")
-				attempt := 1
-				success := false
-				for !success {
-					isoHeaderResp, err := client.Installer.DownloadClusterISOHeaders(context.Background(), &installer.DownloadClusterISOHeadersParams{
-						ClusterID: *cluster.ID,
-					})
-					if err != nil {
-						klog.Fatal(err)
-					}
-					out, err := os.Create(fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, *createCluster.Name))
-					if err != nil {
-						klog.Fatal(err)
-					}
-					defer out.Close()
-					progressWriter := progress.NewWriter(out)
-					ctx, cancel := context.WithCancel(context.Background())
-					defer cancel()
-					go func() {
-						progressChan := progress.NewTicker(ctx, progressWriter, isoHeaderResp.ContentLength, 1*time.Second)
-						var previousTime time.Time
-						var previousByte int64
-						for p := range progressChan {
-							select {
-							case <-ctx.Done():
-								return
-							default:
-								var bytePerSec int64
-								if previousByte != 0 {
-									transferedBytes := p.N() - previousByte
-									duration := time.Since(previousTime).Milliseconds()
-									if duration > 0 && transferedBytes > 0 {
-										durationSec := duration / 1000
-										transferedKbytes := transferedBytes / 1024
-										if durationSec > 0 && transferedKbytes > 0 {
-											bytePerSec = transferedKbytes / durationSec
-										}
+				resp, err := http.Head(infra.GetPayload().DownloadURL)
+				if err != nil {
+					klog.Fatal(err)
+				}
+				if resp.StatusCode != http.StatusOK {
+					klog.Fatal(err)
+				}
+				size, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
+				downloadSize := int64(size)
 
+				out, err := os.Create(fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, *createCluster.Name))
+				if err != nil {
+					klog.Fatal(err)
+				}
+				defer out.Close()
+				progressWriter := progress.NewWriter(out)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				go func() {
+					progressChan := progress.NewTicker(ctx, progressWriter, downloadSize, 1*time.Second)
+					var previousTime time.Time
+					var previousByte int64
+					for p := range progressChan {
+						select {
+						case <-ctx.Done():
+							return
+						default:
+							var bytePerSec int64
+							if previousByte != 0 {
+								transferedBytes := p.N() - previousByte
+								duration := time.Since(previousTime).Milliseconds()
+								if duration > 0 && transferedBytes > 0 {
+									durationSec := duration / 1000
+									transferedKbytes := transferedBytes / 1024
+									if durationSec > 0 && transferedKbytes > 0 {
+										bytePerSec = transferedKbytes / durationSec
 									}
-								}
-								fmt.Printf("\r%v remaining. %d of %d written... %d kbyte/sec", p.Remaining().Round(time.Second), p.N()/1024, isoHeaderResp.ContentLength/1024, bytePerSec)
-								previousByte = p.N()
-								previousTime = time.Now()
-							}
-						}
-					}()
-					if _, err := client.Installer.DownloadClusterISO(context.Background(), &installer.DownloadClusterISOParams{
-						ClusterID: *cluster.ID,
-					}, progressWriter); err != nil {
-						fmt.Println()
-						klog.Errorf("%d attempt of 5 failed with err %+v. Retrying\n", attempt, err)
-						cancel()
-						if _, err := os.Stat(fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, *createCluster.Name)); err == nil {
-							if err := os.Remove(fmt.Sprintf("%s/.aicn2/%s/disk.img", homedir, *createCluster.Name)); err != nil {
-								klog.Error(err)
-							}
-						}
-						if attempt == 5 {
-							cancel()
-							klog.Fatal(err)
-						}
-						attempt++
 
-					} else {
-						cancel()
-						fmt.Println("\rdownload is completed")
-						out.Close()
-						success = true
+								}
+							}
+							fmt.Printf("\r%v remaining. %d of %d written... %d kbyte/sec", p.Remaining().Round(time.Second), p.N()/1024, downloadSize/1024, bytePerSec)
+							previousByte = p.N()
+							previousTime = time.Now()
+						}
 					}
+				}()
+
+				downloadResp, err := http.Get(infra.GetPayload().DownloadURL)
+				if err != nil {
+					klog.Fatal(err)
+				}
+				defer resp.Body.Close()
+
+				_, err = io.Copy(progressWriter, downloadResp.Body)
+				if err != nil {
+					klog.Fatal(err)
 				}
 			}
 		}
+
 		if !skipstorage {
 			klog.Info("Preparing Storage")
 			if err := infraInterface.CreateStorage(infrastructure.Image{
@@ -378,18 +388,18 @@ done`
 					FileName: &fileName,
 					Folder:   &folder,
 				}
-				clusterManifest := &aiManifests.CreateClusterManifestParams{
+				clusterManifest := &aiManifests.V2CreateClusterManifestParams{
 					CreateManifestParams: manifest,
 					ClusterID:            *cluster.ID,
 				}
 
-				if _, err := client.Manifests.CreateClusterManifest(context.Background(), clusterManifest); err != nil {
+				if _, err := client.Manifests.V2CreateClusterManifest(context.Background(), clusterManifest); err != nil {
 					klog.Fatal(err)
 				}
 			}
 		}
 
-		installConfigOK, err := client.Installer.GetClusterInstallConfig(context.Background(), &installer.GetClusterInstallConfigParams{
+		installConfigOK, err := client.Installer.V2GetClusterInstallConfig(context.Background(), &installer.V2GetClusterInstallConfigParams{
 			ClusterID: *cluster.ID,
 		})
 		if err != nil {
@@ -406,18 +416,21 @@ done`
 			if err != nil {
 				klog.Fatal(err)
 			}
-			updateClusterConfigParams := installer.NewUpdateClusterInstallConfigParams()
+			updateClusterConfigParams := installer.NewV2UpdateClusterInstallConfigParams()
 			updateClusterConfigParams.SetClusterID(*cluster.ID)
 			updateClusterConfigParams.SetInstallConfigParams(`{"networking":{"networkType":"Contrail"}}`)
+
 			klog.Info("Setting Network Type")
-			if _, err := client.Installer.UpdateClusterInstallConfig(context.Background(), updateClusterConfigParams); err != nil {
+			if _, err := client.Installer.V2UpdateClusterInstallConfig(context.Background(), updateClusterConfigParams); err != nil {
 				klog.Fatal(err)
 			}
 		}
 		klog.Info("Waiting for Host Discovery")
+		var hostControllerMap = make(map[string]*models.Host)
+		var hostWorkerMap = make(map[string]*models.Host)
 		for {
-			listHostsOK, err := client.Installer.ListHosts(context.Background(), &installer.ListHostsParams{
-				ClusterID: *cluster.ID,
+			listHostsOK, err := client.Installer.V2ListHosts(context.Background(), &installer.V2ListHostsParams{
+				InfraEnvID: *infraID,
 			})
 			if err != nil {
 				klog.Fatal(err)
@@ -427,60 +440,76 @@ done`
 			})
 			hostList := listHostsOK.GetPayload()
 			if len(hostList) == worker+controller {
-				var hostRoles []*models.ClusterUpdateParamsHostsRolesItems0
 				for _, host := range hostList {
-
-					/*
-						if _, err := client.Installer.UpdateHostInstallerArgs(context.Background(), &installer.UpdateHostInstallerArgsParams{
-							ClusterID: *cluster.ID,
-							HostID:    *host.ID,
-							InstallerArgsParams: &models.InstallerArgsParams{
-								Args: []string{"--append-karg", "ipv6.disable=1"},
-							},
-						}); err != nil {
-							klog.Fatal(err)
-						}
-					*/
-
 					hostnameList := strings.Split(host.RequestedHostname, "-")
 					if len(hostnameList) == 3 {
 						if hostnameList[1] == "worker" {
-							hostRoles = append(hostRoles, &models.ClusterUpdateParamsHostsRolesItems0{
-								ID:   *host.ID,
-								Role: models.HostRoleUpdateParamsWorker,
-							})
+							hostWorkerMap[host.RequestedHostname] = host
 						}
 						if hostnameList[1] == "controller" {
-							hostRoles = append(hostRoles, &models.ClusterUpdateParamsHostsRolesItems0{
-								ID:   *host.ID,
-								Role: models.HostRoleUpdateParamsMaster,
-							})
+							hostControllerMap[host.RequestedHostname] = host
 						}
 					}
 				}
-				if len(hostRoles) == worker+controller {
-					klog.Info("Updating Host Roles")
-					usermanagedNetwork := false
-					if _, err := client.Installer.UpdateCluster(context.Background(), &installer.UpdateClusterParams{
-						ClusterID: *cluster.ID,
-						ClusterUpdateParams: &models.ClusterUpdateParams{
-							HostsRoles:            hostRoles,
-							APIVip:                &apiVIP,
-							IngressVip:            &ingressVIP,
-							UserManagedNetworking: &usermanagedNetwork,
-						},
-					}); err != nil {
-						klog.Fatal(err)
-					}
+				if len(hostControllerMap)+len(hostWorkerMap) == worker+controller {
 					break
 				}
 			}
 			time.Sleep(time.Second * 3)
 		}
 
+		for _, h := range hostControllerMap {
+			r := "master"
+			klog.Infof("updating host %s role to %s", h.RequestedHostname, r)
+			_, err := client.Installer.V2UpdateHost(context.Background(), &installer.V2UpdateHostParams{
+				HostUpdateParams: &models.HostUpdateParams{
+					HostRole: &r,
+				},
+				HostID:     *h.ID,
+				InfraEnvID: *infraID,
+			})
+			if err != nil {
+				klog.Fatal(err)
+			}
+		}
+
+		for _, h := range hostWorkerMap {
+			r := "worker"
+			klog.Infof("updating host %s role to %s", h.RequestedHostname, r)
+			_, err := client.Installer.V2UpdateHost(context.Background(), &installer.V2UpdateHostParams{
+				HostUpdateParams: &models.HostUpdateParams{
+					HostRole: &r,
+				},
+				HostID:     *h.ID,
+				InfraEnvID: *infraID,
+			})
+			if err != nil {
+				klog.Fatal(err)
+			}
+		}
+
+		klog.Info("Done Cluster Config")
+		usermanagedNetwork := false
+		if _, err := client.Installer.V2UpdateCluster(context.Background(), &installer.V2UpdateClusterParams{
+			ClusterID: *cluster.ID,
+			ClusterUpdateParams: &models.V2ClusterUpdateParams{
+				APIVip:                &apiVIP,
+				IngressVip:            &ingressVIP,
+				UserManagedNetworking: &usermanagedNetwork,
+				/*
+					MachineNetworks: []*models.MachineNetwork{{
+						Cidr:      models.Subnet(cluster.ClusterNetworkCidr),
+						ClusterID: *cluster.ID,
+					}},
+				*/
+			},
+		}); err != nil {
+			klog.Fatal(err)
+		}
+
 		klog.Info("Waiting for Cluster Ready")
 		for {
-			currentCluster, err := client.Installer.GetCluster(context.Background(), &installer.GetClusterParams{
+			currentCluster, err := client.Installer.V2GetCluster(context.Background(), &installer.V2GetClusterParams{
 				ClusterID: *cluster.ID,
 			})
 			if err != nil {
@@ -489,7 +518,7 @@ done`
 			status := currentCluster.GetPayload().Status
 			if *status == "ready" {
 				klog.Info("Cluster Ready, starting Installation")
-				_, err = client.Installer.InstallCluster(context.Background(), &installer.InstallClusterParams{
+				_, err = client.Installer.V2InstallCluster(context.Background(), &installer.V2InstallClusterParams{
 					ClusterID: *cluster.ID,
 				})
 				if err != nil {

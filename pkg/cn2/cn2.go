@@ -596,9 +596,11 @@ func defineVM(name, clustername, role, nameserver, domainName, registry, memory 
 							BlockMultiQueue: &blockMQ,
 							Interfaces: []kubevirtV1.Interface{{
 								Name: "default",
+
 								InterfaceBindingMethod: kubevirtV1.InterfaceBindingMethod{
 									Bridge: &kubevirtV1.InterfaceBridge{},
 								},
+
 								//MacAddress: mac1,
 							}, {
 								Name: clustername,
